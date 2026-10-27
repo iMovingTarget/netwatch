@@ -25,9 +25,22 @@ stub_listener_setting() {
     printf '%s\n' "${found:-DNSStubListener not set (default: yes)}"
 }
 
-# Active (non-comment, non-blank) lines of each config file given.
+# Active (non-comment, non-blank) lines of each existing config file given, at most
+# CONFIG_PREVIEW_LINES per file: a blocklist dropped into a conf-dir can run to tens of
+# thousands of lines.
+CONFIG_PREVIEW_LINES=40
+export CONFIG_PREVIEW_LINES
 show_config_files() {
-    grep -Hv -e "^[[:space:]]*#" -e "^[[:space:]]*$" "$@"
+    local file active
+    for file in "$@"; do
+        [ -f "$file" ] || continue
+        active=$(grep -cv -e "^[[:space:]]*#" -e "^[[:space:]]*$" "$file")
+        printf -- '--- %s (%d active lines)\n' "$file" "$active"
+        grep -v -e "^[[:space:]]*#" -e "^[[:space:]]*$" "$file" | head -n "$CONFIG_PREVIEW_LINES"
+        if [ "$active" -gt "$CONFIG_PREVIEW_LINES" ]; then
+            printf '... %d more lines not shown\n' "$((active - CONFIG_PREVIEW_LINES))"
+        fi
+    done
 }
 
 export -f stub_listener_setting show_config_files

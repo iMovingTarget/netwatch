@@ -64,3 +64,24 @@ def test_stub_listener_default_when_unset(tmp_path: Path) -> None:
     assert _call("stub_listener_setting", str(tmp_path)).strip() == (
         "DNSStubListener not set (default: yes)"
     )
+
+
+def test_long_config_file_is_summarised(tmp_path: Path) -> None:
+    # Regression: a 78,000-line blocklist in /etc/dnsmasq.d/ was printed in full and turned the
+    # report into a 4.5 MB file.
+    small = _write(tmp_path / "dnsmasq.conf", "# comment\n\nlisten-address=192.0.2.10\n")
+    big = _write(
+        tmp_path / "dnsmasq.d/blocklist.hosts",
+        "".join(f"0.0.0.0 ad{i}.example\n" for i in range(5000)),
+    )
+
+    lines = _call("show_config_files", str(small), str(big)).splitlines()
+
+    assert "listen-address=192.0.2.10" in lines
+    assert len(lines) < 60
+    assert any("5000 active lines" in line for line in lines)
+    assert any("more lines not shown" in line for line in lines)
+
+
+def test_missing_config_files_are_skipped(tmp_path: Path) -> None:
+    assert _call("show_config_files", str(tmp_path / "absent.conf")) == ""
