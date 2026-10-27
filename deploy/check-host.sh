@@ -13,7 +13,7 @@
 set -o pipefail
 export LC_ALL=C
 
-CHECK_VERSION=1
+CHECK_VERSION=2
 
 # Effective systemd-resolved stub listener setting under the root directory $1.
 # grep exits 2 when one of the paths is missing (the drop-in directory usually is) even if it
@@ -89,7 +89,8 @@ main() {
     section "python"
     run 'python3 --version'
     run 'python3 -c "import venv, ensurepip; print(\"venv and ensurepip available\")"'
-    run 'dpkg-query -W python3 python3-venv python3-pip'
+    # Status "ii" means installed; "un" means known to apt but not installed.
+    run "dpkg-query -W -f '\${db:Status-Abbrev} \${Package} \${Version}\n' python3 python3-venv python3-pip"
 
     section "network"
     run 'ip -br link'
@@ -98,6 +99,9 @@ main() {
     run 'ip -6 route'
     run 'ls -l /etc/netplan/'
     run 'cat /etc/netplan/*.yaml'
+    # Everything listening, on every address: what a LAN (or, over a global IPv6 address, the
+    # internet) could reach if the firewall allowed it.
+    run 'ss -lntu'
 
     section "name resolution of the host itself"
     run 'ls -l /etc/resolv.conf'
@@ -108,7 +112,7 @@ main() {
 
     section "port 53 and resolvers"
     run 'ss -lntup "( sport = :53 )"'
-    run 'dpkg-query -W dnsmasq dnsmasq-base unbound bind9'
+    run "dpkg-query -W -f '\${db:Status-Abbrev} \${Package} \${Version}\n' dnsmasq dnsmasq-base unbound bind9"
     run 'systemctl is-enabled dnsmasq.service; systemctl is-active dnsmasq.service'
     run 'show_config_files /etc/dnsmasq.conf /etc/dnsmasq.d/*'
     run 'grep -v -e "^#" -e "^$" /etc/default/dnsmasq'
@@ -131,6 +135,8 @@ main() {
 
     section "firewall"
     run 'ufw status verbose'
+    # With IPV6=no, ufw leaves IPv6 unfiltered while the host may have a global IPv6 address.
+    run 'grep "^IPV6=" /etc/default/ufw'
 
     section "updates"
     run 'ls -l --time-style=long-iso /var/lib/apt/periodic/update-success-stamp /var/cache/apt/pkgcache.bin'
