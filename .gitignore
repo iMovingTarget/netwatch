@@ -1,6 +1,30 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
-.env
-*.log
+venv/
 
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local secrets and settings
+.env
+*.env
+!deploy/*.env.example
+
+# Local state from running netwatch outside systemd
+var/
+*.db
+*.db-shm
+*.db-wal
+
+# Real logs stay local; only fixtures and examples are committed
+*.log
+!tests/fixtures/*.log
+!examples/*.log
