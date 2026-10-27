@@ -1,0 +1,99 @@
+"""SQLite storage shared by the Netwatch services.
+
+One database file in the state directory. The services write to it and the CLI and dashboard read
+from it, so it runs in WAL mode: readers never block the writer and the writer never blocks
+readers. A busy timeout makes a second writer wait for the lock instead of failing at once.
+
+The schema version lives in SQLite's ``user_version`` header field. Migrations run in order inside
+one write transaction, so two services starting at the same moment can't both migrate.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+from netwatch.errors import StorageError
+
+BUSY_TIMEOUT_S = 5.0
+
+# Version -> statements that move the schema from version - 1 to version. Append only.
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    1: ("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",),
+}
+SCHEMA_VERSION = max(MIGRATIONS)
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    """Open the database at ``path`` and bring its schema up to date.
+
+    The connection is in autocommit mode; group writes with ``transaction()``.
+    """
+    try:
+        conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
+    except sqlite3.Error as exc:
+        raise StorageError(f"cannot open database {path}: {exc}") from exc
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        _migrate(conn)
+    except sqlite3.Error as exc:
+        conn.close()
+        raise StorageError(f"cannot open database {path}: {exc}") from exc
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Run a block as one write transaction: committed on success, rolled back on error.
+
+    BEGIN IMMEDIATE takes the write lock at the start. A deferred transaction that reads first
+    and writes later can fail with "database is locked" when another writer got in between;
+    taking the lock up front turns that into a wait covered by the busy timeout.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    version: int = conn.execute("PRAGMA user_version").fetchone()[0]
+    return version
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?)"
+            " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return None if row is None else str(row[0])
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    with transaction(conn):
+        current = schema_version(conn)
+        if current > SCHEMA_VERSION:
+            raise StorageError(
+                f"database schema version {current} is newer than this Netwatch supports"
+                f" ({SCHEMA_VERSION}); install a newer Netwatch"
+            )
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            for statement in MIGRATIONS[version]:
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {version:d}")
