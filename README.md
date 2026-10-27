@@ -10,24 +10,41 @@ pipeline every later phase builds on: an install script that deploys an exact gi
 hardened systemd service, an uninstall script, CI that runs that install on a real systemd host,
 and a placeholder service that proves the whole path works.
 
+Installing the Phase 0 branch on the VM (Ubuntu Server 26.04.1, systemd 259, Python 3.14), then
+the service's journal across a reboot:
+
 ```
-$ sudo deploy/install.sh v0.1.0
-install: fetching v0.1.0 from https://github.com/iMovingTarget/netwatch.git
-install: resolved v0.1.0 to <commit>
-install: building /opt/netwatch/releases/<commit>
-install: smoke test: netwatch 0.1.0 (revision <commit>)
+$ sudo deploy/install.sh phase-0-foundation
+install: fetching phase-0-foundation from https://github.com/iMovingTarget/netwatch.git
+install: resolved phase-0-foundation to 42a01d549cc5a3811a8692d6171945d698e07a5b
+install: building /opt/netwatch/releases/42a01d549cc5a3811a8692d6171945d698e07a5b
+install: smoke test: netwatch 0.1.0.dev0 (revision 42a01d549cc5)
 install: creating system user netwatch
 install: created /etc/netwatch/netwatch.env from the example
-install: installed netwatch 0.1.0 (revision <commit>) from v0.1.0
+install: installed netwatch 0.1.0.dev0 (revision 42a01d549cc5) from phase-0-foundation
 install:   netwatch-skeleton.service: active
 install: logs: journalctl -u 'netwatch*' -n 50
+
+$ journalctl -u netwatch-skeleton -o short-iso
+22:07:18 systemd[1]: Started netwatch-skeleton.service - Netwatch walking skeleton (deploy pipeline check).
+22:07:18 netwatch[2648]: netwatch.skeleton: started version=0.1.0.dev0 revision=42a01d549cc5a3811a8692d6171945d698e07a5b db=/var/lib/netwatch/netwatch.db
+22:07:20 netwatch[2648]: netwatch.skeleton: stopped
+22:07:20 systemd[1]: Stopping netwatch-skeleton.service - Netwatch walking skeleton (deploy pipeline check)...
+22:07:21 systemd[1]: netwatch-skeleton.service: Deactivated successfully.
+22:07:21 systemd[1]: Stopped netwatch-skeleton.service - Netwatch walking skeleton (deploy pipeline check).
+-- Boot b587e4c4892f49d5a0e3e36cc8ea6891 --
+22:07:28 systemd[1]: Started netwatch-skeleton.service - Netwatch walking skeleton (deploy pipeline check).
+22:07:28 netwatch[1184]: netwatch.skeleton: started version=0.1.0.dev0 revision=42a01d549cc5a3811a8692d6171945d698e07a5b db=/var/lib/netwatch/netwatch.db
 ```
+
+Timestamps are cut to the time of day and the hostname is removed; nothing else is edited. The
+reboot shows the clean stop on SIGTERM and the automatic start on boot.
 
 ## What it does
 
 | Phase | Release | What | Status |
 |---|---|---|---|
-| 0 | v0.1.0 | Install script, hardened unit, CI install test, storage and logging base | in progress |
+| 0 | v0.1.0 | Install script, hardened unit, CI install test, storage and logging base | done |
 | 1 | v0.2.0 | DNS logger and sinkhole: dnsmasq answers, Netwatch logs every query and manages blocklists | planned |
 | 2 | v0.3.0 | Live failed-login detection for sshd, reusing [log-analyzer](https://github.com/iMovingTarget/log_analyzer) | planned |
 | 3 | v0.4.0 | Periodic ARP scan, device inventory, alert on unknown devices | planned |
@@ -47,10 +64,10 @@ pip install -e ".[dev]"
 
 ```
 $ netwatch --version
-netwatch 0.1.0.dev0
+netwatch 0.1.0
 $ NETWATCH_STATE_DIR=var netwatch skeleton
-21:00:46 INFO netwatch.skeleton: started version=0.1.0.dev0 revision=unknown db=var/netwatch.db
-^C21:00:48 INFO netwatch.skeleton: stopped
+22:11:41 INFO netwatch.skeleton: started version=0.1.0 revision=unknown db=var/netwatch.db
+^C22:11:42 INFO netwatch.skeleton: stopped
 ```
 
 ## Deploying to a host
