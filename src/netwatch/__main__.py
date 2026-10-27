@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
+import threading
 from collections.abc import Callable, Mapping, Sequence
+from types import FrameType
 
-from netwatch import __version__
-from netwatch.config import read_revision
+from netwatch import __version__, logsetup, skeleton
+from netwatch.config import load_settings, read_revision
 from netwatch.errors import NetwatchError
 
 Handler = Callable[[argparse.Namespace, Mapping[str, str]], int]
@@ -28,8 +31,29 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         description="Home-network security monitor for a Linux host.",
     )
     parser.add_argument("--version", action="version", version=version_string(environ))
-    parser.add_subparsers(dest="command", metavar="<command>")
+    commands = parser.add_subparsers(dest="command", metavar="<command>")
+
+    skeleton_cmd = commands.add_parser(
+        "skeleton",
+        help="run the Phase 0 placeholder service until SIGTERM or SIGINT",
+        description="Placeholder service that proves the deploy pipeline (replaced in Phase 1).",
+    )
+    skeleton_cmd.set_defaults(handler=_run_skeleton)
     return parser
+
+
+def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    stop = threading.Event()
+
+    def request_stop(signum: int, frame: FrameType | None) -> None:
+        # Only set the flag: logging from a signal handler can deadlock on the handler's lock.
+        stop.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    return skeleton.run(settings, stop)
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
