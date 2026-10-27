@@ -16,10 +16,13 @@ export LC_ALL=C
 CHECK_VERSION=1
 
 # Effective systemd-resolved stub listener setting under the root directory $1.
+# grep exits 2 when one of the paths is missing (the drop-in directory usually is) even if it
+# matched in the other, so decide on its output, not on its exit code.
 stub_listener_setting() {
-    local root=${1:-}
-    grep -rHs "^[^#]*DNSStubListener" "$root/etc/systemd/resolved.conf" \
-        "$root/etc/systemd/resolved.conf.d/" || echo "DNSStubListener not set (default: yes)"
+    local root=${1:-} found
+    found=$(grep -rHs "^[^#]*DNSStubListener" "$root/etc/systemd/resolved.conf" \
+        "$root/etc/systemd/resolved.conf.d/")
+    printf '%s\n' "${found:-DNSStubListener not set (default: yes)}"
 }
 
 # Active (non-comment, non-blank) lines of each config file given.
