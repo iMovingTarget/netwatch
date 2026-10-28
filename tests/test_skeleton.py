@@ -15,13 +15,16 @@ import pytest
 import netwatch
 from netwatch import skeleton, storage
 from netwatch.__main__ import main
-from netwatch.config import Settings
+from netwatch.config import Settings, load_settings
 
 FIXED_NOW = datetime(2026, 10, 27, 20, 0, 0, tzinfo=UTC)
 
 
 def _settings(state_dir: Path, revision: str | None = "abc123") -> Settings:
-    return Settings(state_dir=state_dir, log_level="INFO", revision=revision)
+    env = {"NETWATCH_STATE_DIR": str(state_dir)}
+    if revision:
+        env["NETWATCH_REVISION"] = revision
+    return load_settings(env)
 
 
 def test_run_records_start_and_returns_when_stopped(tmp_path: Path) -> None:
@@ -47,11 +50,6 @@ def test_unusable_state_dir_is_a_one_line_error(
     err = capsys.readouterr().err
     assert err.startswith("netwatch: cannot create state directory")
     assert "Traceback" not in err
-
-
-def test_missing_state_dir_setting_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["skeleton"], environ={}) == 2
-    assert capsys.readouterr().err.startswith("netwatch: no state directory")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")

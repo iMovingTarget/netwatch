@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
 from netwatch import __version__, logsetup, skeleton
-from netwatch.config import load_settings, read_revision
+from netwatch.config import environ_with_env_file, load_settings, read_revision
 from netwatch.errors import NetwatchError
 
 Handler = Callable[[argparse.Namespace, Mapping[str, str]], int]
@@ -57,7 +57,12 @@ def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
-    env = os.environ if environ is None else environ
+    """Run a command. ``environ`` replaces the real environment and settings file (for tests)."""
+    try:
+        env = environ_with_env_file(os.environ) if environ is None else environ
+    except NetwatchError as exc:
+        print(f"netwatch: {exc}", file=sys.stderr)
+        return exc.exit_code
     parser = build_parser(env)
     args = parser.parse_args(argv)
     if args.command is None:
