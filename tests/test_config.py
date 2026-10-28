@@ -43,9 +43,17 @@ def test_unknown_log_level_is_a_config_error() -> None:
         load_settings({"STATE_DIRECTORY": "/x", "NETWATCH_LOG_LEVEL": "loud"})
 
 
-def test_revision_is_optional() -> None:
-    assert read_revision({}) is None
-    assert read_revision({"NETWATCH_REVISION": " abc123 "}) == "abc123"
+def test_revision_is_optional(tmp_path: Path) -> None:
+    assert read_revision({}, release_dir=tmp_path) is None
+    assert read_revision({"NETWATCH_REVISION": " abc123 "}, release_dir=tmp_path) == "abc123"
+
+
+def test_revision_falls_back_to_the_release_directory(tmp_path: Path) -> None:
+    # Regression: `netwatch --version` from a shell showed no revision, because only the
+    # services load revision.env.
+    (tmp_path / "revision.env").write_text("NETWATCH_REVISION=feedface\nNETWATCH_REF=v0.2.0\n")
+    assert read_revision({}, release_dir=tmp_path) == "feedface"
+    assert read_revision({"NETWATCH_REVISION": "abc123"}, release_dir=tmp_path) == "abc123"
 
 
 def test_dns_defaults() -> None:
@@ -56,6 +64,21 @@ def test_dns_defaults() -> None:
     assert settings.blocklist_urls[0].startswith("https://raw.githubusercontent.com/StevenBlack/")
     assert settings.blocklist_dir == Path("/var/lib/netwatch-blocklist")
     assert settings.dns_retention_days == 30
+
+
+def test_auth_settings() -> None:
+    defaults = load_settings({})
+    assert (defaults.auth_max_failures, defaults.auth_window_minutes) == (5, 10)
+    assert defaults.auth_retention_days == 90
+    settings = load_settings(
+        {
+            "NETWATCH_AUTH_MAX_FAILURES": "3",
+            "NETWATCH_AUTH_WINDOW_MINUTES": "60",
+            "NETWATCH_AUTH_RETENTION_DAYS": "7",
+        }
+    )
+    assert (settings.auth_max_failures, settings.auth_window_minutes) == (3, 60)
+    assert settings.auth_retention_days == 7
 
 
 def test_dns_settings_are_comma_separated_and_validated() -> None:
@@ -81,6 +104,9 @@ def test_dns_settings_are_comma_separated_and_validated() -> None:
         ("NETWATCH_DNS_UPSTREAMS", "1.1.1.1,dns.example", "not an IP address"),
         ("NETWATCH_BLOCKLIST_URLS", "http://example.com/hosts", "must be an https:// URL"),
         ("NETWATCH_DNS_RETENTION_DAYS", "0", "whole number of days"),
+        ("NETWATCH_AUTH_MAX_FAILURES", "five", "whole number of failures"),
+        ("NETWATCH_AUTH_WINDOW_MINUTES", "-1", "whole number of minutes"),
+        ("NETWATCH_AUTH_RETENTION_DAYS", "0", "whole number of days"),
     ],
 )
 def test_invalid_dns_settings_are_config_errors(key: str, value: str, message: str) -> None:

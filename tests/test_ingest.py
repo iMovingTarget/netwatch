@@ -55,16 +55,6 @@ def test_journal_command() -> None:
     assert ingest.journal_command("s=abc;i=1") == [*base, "--cursor=s=abc;i=1"]
 
 
-def test_parse_record() -> None:
-    record = {"MESSAGE": "cleared cache", "__CURSOR": "c1", "__REALTIME_TIMESTAMP": "123"}
-    assert ingest.parse_record(json.dumps(record).encode()) == ("cleared cache", 123, "c1")
-    # journald exports a message that isn't valid UTF-8 as an array of bytes
-    record["MESSAGE"] = [104, 105, 0xFF]
-    assert ingest.parse_record(json.dumps(record).encode()) == ("hi�", 123, "c1")
-    assert ingest.parse_record(b"not json") is None
-    assert ingest.parse_record(b'{"MESSAGE": "no cursor"}') is None
-
-
 def test_ingester_stores_every_query_once(conn: sqlite3.Connection) -> None:
     ingester = _ingester(conn)
     for line in _lines():

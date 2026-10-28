@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+### Added
+- Live SSH login monitoring (Phase 2). `netwatch-auth.service` follows sshd's journal (as `sshd`
+  and `sshd-session`), stores every failed and successful login with its address, account,
+  method and whether the account exists, and resumes after a restart without gaps; 90-day
+  retention (`NETWATCH_AUTH_RETENTION_DAYS`).
+- Alerts: `ssh-brute-force` (warning) when one address fails `NETWATCH_AUTH_MAX_FAILURES` (5)
+  times within `NETWATCH_AUTH_WINDOW_MINUTES` (10), once per address per window, and
+  `ssh-login-after-failures` (critical) for the first successful login from that address
+  afterwards. Alerts are stored in a table later phases share and logged to the journal; the
+  monitor reloads the current window from the database when it starts.
+- Commands: `netwatch auth watch [--from-file]`, `netwatch auth recent`, `netwatch alerts`.
+  Usernames, which clients choose, are escaped in the tables.
+- `examples/sshd-journal.jsonl`: a real, anonymised sshd log from the VM.
+- CI fails six SSH logins against the runner's sshd and checks the stored rows and the alert.
+
+### Changed
+- Depends on [log-analyzer](https://github.com/iMovingTarget/log-analyzer) 0.6.0 (installed
+  from its git tag) for SSH parsing and rate tracking.
+- Journal following moved from the DNS logger into `netwatch.journal`, shared by both services.
+
+### Fixed
+- `netwatch --version` from a shell shows the deployed revision; only the services did.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added
@@ -50,6 +75,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - CI: ruff, pytest on Python 3.12 to 3.14 (Linux) and 3.14 (Windows), shellcheck, a unit
   hardening threshold, and an install, run and uninstall on a real systemd host.
 
-[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iMovingTarget/netwatch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iMovingTarget/netwatch/releases/tag/v0.1.0

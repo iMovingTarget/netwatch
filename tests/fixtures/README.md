@@ -21,3 +21,17 @@ interface:
 - `dig` sent the queries from 192.0.2.10 and 192.0.2.11, including one over TCP (answered by a
   dnsmasq child process with its own PID). Midway the blocklist was replaced by an atomic rename
   (dnsmasq reloads it through inotify), and at the end dnsmasq was restarted once.
+
+## sshd-journal.jsonl
+
+Real OpenSSH 10.2 logging from the Netwatch VM (Ubuntu 26.04.1), exported with
+`journalctl -t sshd -t sshd-session -o json` on 2026-10-28. It shows eight failed logins in about
+four seconds, as an unknown user each time from a client that offered no credentials (each logs
+`Invalid user` and then `Connection closed by invalid user ... [preauth]`), between normal key
+logins from an admin workstation.
+
+Anonymised before committing: the attacking address (127.0.0.1 in the capture) is 203.0.113.5,
+the workstation is 192.0.2.10, the account name is `alice`, and the key fingerprint and the
+boot, machine and sequence IDs inside the cursors are made up. Only the fields Netwatch reads
+are kept (`MESSAGE`, `__CURSOR`, `__REALTIME_TIMESTAMP`, `SYSLOG_IDENTIFIER`, `_PID`,
+`PRIORITY`); the timestamps and message text are otherwise as logged. `examples/` has a copy.

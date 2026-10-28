@@ -15,6 +15,8 @@ from types import FrameType
 
 from netwatch import (
     __version__,
+    authdb,
+    authwatch,
     blocklist,
     dnsdb,
     dnsmasq,
@@ -90,6 +92,31 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     top_cmd.add_argument("-n", type=int, default=10, help="rows per list (default: 10)")
     top_cmd.set_defaults(handler=_dns_top)
 
+    auth = commands.add_parser("auth", help="SSH login monitoring").add_subparsers(
+        dest="auth_command", metavar="<auth command>", required=True
+    )
+    watch_cmd = auth.add_parser(
+        "watch",
+        help="follow sshd's log, store every login and raise alerts (the netwatch-auth service)",
+        description="Follow sshd's journal and store every failed and successful login until"
+        " SIGTERM or SIGINT, raising an alert on brute force.",
+    )
+    watch_cmd.add_argument(
+        "--from-file",
+        metavar="FILE",
+        help="store the logins in a saved `journalctl -o json` export of sshd's log and exit",
+    )
+    watch_cmd.set_defaults(handler=_run_auth_watch)
+    auth_recent_cmd = auth.add_parser("recent", help="show the most recent SSH logins")
+    auth_recent_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    auth_recent_cmd.add_argument("--source", help="only logins from this address")
+    auth_recent_cmd.add_argument("--failed", action="store_true", help="only failed logins")
+    auth_recent_cmd.set_defaults(handler=_auth_recent)
+
+    alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
+    alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    alerts_cmd.set_defaults(handler=_alerts)
+
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
     )
@@ -133,6 +160,17 @@ def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     return ingest.run(settings, _stop_on_signals())
 
 
+def _run_auth_watch(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    if args.from_file:
+        added, alerts = authwatch.import_file(settings, Path(args.from_file))
+        plural = "" if alerts == 1 else "s"
+        print(f"stored {added} new login events from {args.from_file}, {alerts} alert{plural}")
+        return 0
+    return authwatch.run(settings, _stop_on_signals())
+
+
 def _dns_config(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     print(dnsmasq.render_config(load_settings(environ)), end="")
     return 0
@@ -170,7 +208,7 @@ def _open_db(environ: Mapping[str, str]) -> closing[storage.sqlite3.Connection]:
     settings = load_settings(environ)
     path = settings.state_dir / ingest.DB_NAME
     if not path.exists():
-        raise NetwatchError(f"no database at {path} (is netwatch-dns running?)")
+        raise NetwatchError(f"no database at {path} (is a netwatch service running?)")
     return closing(storage.connect(path))
 
 
@@ -185,6 +223,20 @@ def _dns_top(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     since_us = time.time_ns() // 1000 - args.hours * 3_600_000_000
     with _open_db(environ) as conn:
         print(report.summary(conn, since_us, args.hours, args.n), end="")
+    return 0
+
+
+def _auth_recent(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        events = authdb.recent(conn, args.n, source=args.source, failed_only=args.failed)
+    print(report.auth_table(events), end="")
+    return 0
+
+
+def _alerts(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        alerts = authdb.alerts(conn, args.n)
+    print(report.alerts_table(alerts), end="")
     return 0
 
 

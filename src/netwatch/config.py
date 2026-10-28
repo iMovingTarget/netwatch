@@ -11,6 +11,7 @@ in tests.
 from __future__ import annotations
 
 import ipaddress
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,12 @@ DEFAULT_ALLOWLIST_FILE = "/etc/netwatch/allowlist.txt"
 DEFAULT_UPSTREAMS = ("1.1.1.1", "9.9.9.9")
 DEFAULT_BLOCKLIST_URLS = ("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",)
 DEFAULT_RETENTION_DAYS = 30
+DEFAULT_AUTH_MAX_FAILURES = 5
+DEFAULT_AUTH_WINDOW_MINUTES = 10
+DEFAULT_AUTH_RETENTION_DAYS = 90
+
+#: Written by install.sh into each release directory, next to its virtualenv.
+REVISION_FILE = "revision.env"
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,9 @@ class Settings:
     blocklist_dir: Path
     allowlist_file: Path  # names never to block, one per line
     dns_retention_days: int
+    auth_max_failures: int  # failed SSH logins from one address that raise an alert ...
+    auth_window_minutes: int  # ... within this many minutes
+    auth_retention_days: int
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
@@ -61,12 +71,35 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         dns_retention_days=_positive_int(
             environ, "NETWATCH_DNS_RETENTION_DAYS", DEFAULT_RETENTION_DAYS
         ),
+        auth_max_failures=_positive_int(
+            environ, "NETWATCH_AUTH_MAX_FAILURES", DEFAULT_AUTH_MAX_FAILURES, unit="failures"
+        ),
+        auth_window_minutes=_positive_int(
+            environ, "NETWATCH_AUTH_WINDOW_MINUTES", DEFAULT_AUTH_WINDOW_MINUTES, unit="minutes"
+        ),
+        auth_retention_days=_positive_int(
+            environ, "NETWATCH_AUTH_RETENTION_DAYS", DEFAULT_AUTH_RETENTION_DAYS
+        ),
     )
 
 
-def read_revision(environ: Mapping[str, str]) -> str | None:
-    """The git commit the installer deployed (NETWATCH_REVISION), or None outside a deploy."""
-    return environ.get("NETWATCH_REVISION", "").strip() or None
+def read_revision(environ: Mapping[str, str], release_dir: Path | None = None) -> str | None:
+    """The git commit the installer deployed, or None outside a deploy.
+
+    Services get NETWATCH_REVISION from their EnvironmentFile. The CLI started from a shell
+    doesn't, so it falls back to the revision.env install.sh wrote into the release directory,
+    which holds the virtualenv this Python runs from (``release_dir`` replaces it in tests).
+    """
+    revision = environ.get("NETWATCH_REVISION", "").strip()
+    if revision:
+        return revision
+    if release_dir is None:
+        release_dir = Path(sys.prefix).parent
+    try:
+        values = read_env_file(str(release_dir / REVISION_FILE))
+    except ConfigError:
+        return None
+    return values.get("NETWATCH_REVISION", "").strip() or None
 
 
 def read_env_file(path: str) -> dict[str, str]:
@@ -155,10 +188,10 @@ def _urls(environ: Mapping[str, str], key: str, default: tuple[str, ...]) -> tup
     return tuple(items) or default
 
 
-def _positive_int(environ: Mapping[str, str], key: str, default: int) -> int:
+def _positive_int(environ: Mapping[str, str], key: str, default: int, unit: str = "days") -> int:
     raw = environ.get(key, "").strip()
     if not raw:
         return default
     if not raw.isdigit() or int(raw) == 0:
-        raise ConfigError(f"{key} must be a whole number of days, not {raw!r}")
+        raise ConfigError(f"{key} must be a whole number of {unit}, not {raw!r}")
     return int(raw)

@@ -1,0 +1,54 @@
+# Follows sshd's log in the journal, stores every login and raises brute-force alerts
+# (netwatch auth watch).
+[Unit]
+Description=Netwatch SSH login monitor
+Documentation=https://github.com/iMovingTarget/netwatch
+After=ssh.service
+
+[Service]
+Type=simple
+User=netwatch
+Group=netwatch
+# Reading the system journal needs this group, not root.
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/netwatch/netwatch.env
+EnvironmentFile=/opt/netwatch/current/revision.env
+ExecStart=/opt/netwatch/current/venv/bin/netwatch auth watch
+Restart=on-failure
+RestartSec=5s
+StateDirectory=netwatch
+StateDirectoryMode=0750
+UMask=0027
+
+# Sandboxing. It reads the journal and its code, and writes only /var/lib/netwatch.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+# No ProcSubset=pid here: journalctl reads /proc/sys/kernel/random/boot_id, which that setting
+# hides, and fails with "Failed to get boot ID".
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

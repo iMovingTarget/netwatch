@@ -51,7 +51,7 @@ jobs:
         run: netwatch --version
 
   deploy:
-    name: deploy (install, DNS end to end, uninstall under systemd)
+    name: deploy (install, DNS and SSH end to end, uninstall under systemd)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -64,7 +64,9 @@ jobs:
       - name: Prepare the runner
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q python3-venv dnsutils
+          sudo apt-get install -y -q python3-venv dnsutils openssh-server
+          # An sshd to fail logins against (socket-activated on Ubuntu 24.04).
+          sudo systemctl start ssh.socket || sudo systemctl start ssh.service
           # install.sh runs as root and clones this checkout, which the runner user owns.
           sudo git config --system --add safe.directory "$GITHUB_WORKSPACE"
           # Give the commit under test a branch name so a plain clone carries it.
@@ -76,13 +78,16 @@ jobs:
             sudo tee /etc/netwatch/netwatch.env
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
+      - name: The CLI from a shell reports the deployed revision
+        run: netwatch --version | grep -F "(revision ${GITHUB_SHA:0:12})"
       - name: Services run under systemd, dnsmasq only on the listen address
         run: |
           set -x
           for unit in deploy/systemd/*.service; do
             sudo systemd-analyze verify "/etc/systemd/system/$(basename "$unit")"
           done
-          systemctl is-active netwatch-dns.service dnsmasq.service netwatch-blocklist.timer
+          systemctl is-active netwatch-dns.service netwatch-auth.service dnsmasq.service \
+            netwatch-blocklist.timer
           sudo ss -lnup | grep ':53 '
           if sudo ss -lnup | grep ':53 ' | grep dnsmasq | grep -v '192.0.2.53:53'; then
             echo "dnsmasq listens on more than the configured address"; exit 1
@@ -106,6 +111,23 @@ jobs:
           sudo systemctl start netwatch-dns.service
           sleep 4
           netwatch dns recent -n 50 | grep while-stopped.example.org
+      - name: Failed SSH logins are stored once each and raise one alert
+        run: |
+          set -x
+          for i in 1 2 3 4 5 6; do
+            ssh -o BatchMode=yes -o PubkeyAuthentication=no -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null "nwtest$i@127.0.0.1" true || true
+          done
+          for _ in $(seq 20); do
+            if netwatch alerts | grep -q ssh-brute-force; then break; fi
+            sleep 1
+          done
+          netwatch auth recent --failed -n 50 | tee failed.txt
+          # Each attempt logs "Invalid user" and a pre-auth disconnect: six attempts, six rows.
+          test "$(grep -c '^[0-9-]* [0-9:]*  127\.0\.0\.1 ' failed.txt)" -eq 6
+          netwatch alerts | tee alerts.txt
+          test "$(grep -c 'ssh-brute-force .*from 127\.0\.0\.1' alerts.txt)" -eq 1
       - name: Re-installing the same commit reuses the build
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test | grep "reusing"
       - name: Uninstall --purge leaves nothing behind
