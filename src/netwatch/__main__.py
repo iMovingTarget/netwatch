@@ -15,6 +15,7 @@ from types import FrameType
 
 from netwatch import (
     __version__,
+    authdb,
     authwatch,
     blocklist,
     dnsdb,
@@ -106,6 +107,15 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         help="store the logins in a saved `journalctl -o json` export of sshd's log and exit",
     )
     watch_cmd.set_defaults(handler=_run_auth_watch)
+    auth_recent_cmd = auth.add_parser("recent", help="show the most recent SSH logins")
+    auth_recent_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    auth_recent_cmd.add_argument("--source", help="only logins from this address")
+    auth_recent_cmd.add_argument("--failed", action="store_true", help="only failed logins")
+    auth_recent_cmd.set_defaults(handler=_auth_recent)
+
+    alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
+    alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    alerts_cmd.set_defaults(handler=_alerts)
 
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
@@ -198,7 +208,7 @@ def _open_db(environ: Mapping[str, str]) -> closing[storage.sqlite3.Connection]:
     settings = load_settings(environ)
     path = settings.state_dir / ingest.DB_NAME
     if not path.exists():
-        raise NetwatchError(f"no database at {path} (is netwatch-dns running?)")
+        raise NetwatchError(f"no database at {path} (is a netwatch service running?)")
     return closing(storage.connect(path))
 
 
@@ -213,6 +223,20 @@ def _dns_top(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     since_us = time.time_ns() // 1000 - args.hours * 3_600_000_000
     with _open_db(environ) as conn:
         print(report.summary(conn, since_us, args.hours, args.n), end="")
+    return 0
+
+
+def _auth_recent(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        events = authdb.recent(conn, args.n, source=args.source, failed_only=args.failed)
+    print(report.auth_table(events), end="")
+    return 0
+
+
+def _alerts(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        alerts = authdb.alerts(conn, args.n)
+    print(report.alerts_table(alerts), end="")
     return 0
 
 

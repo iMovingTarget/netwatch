@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from netwatch import dnsdb, ingest, report, storage
+from netwatch import authdb, dnsdb, ingest, report, storage
 from netwatch.__main__ import main
+from netwatch.authlog import Alert, AuthEvent
 from netwatch.dnslog import DnsQuery
 
 T0 = 1_793_188_800_000_000  # 2026-10-28 12:00:00 UTC in microseconds
@@ -61,3 +62,57 @@ def test_recent_and_top_commands(tmp_path: Path, capsys: pytest.CaptureFixture[s
     assert "2 forwarded (66.7%), 1 blocked (33.3%)" in text
     assert "        1  ads.example.com" in text
     assert "        2        0  192.0.2.10" in text
+
+
+def _auth_events() -> list[AuthEvent]:
+    def event(ts: int, source: str, user: str, outcome: str, invalid: bool) -> AuthEvent:
+        method = "publickey" if outcome == "accepted" else None
+        return AuthEvent(T0 + ts, source, user, outcome, method, invalid, "m", f"c{ts}")
+
+    return [
+        event(0, "203.0.113.5", "admin", "failed", True),
+        event(1_000_000, "203.0.113.5", "root", "failed", False),
+        event(2_000_000, "192.0.2.10", "alice", "accepted", False),
+    ]
+
+
+def test_auth_table_is_aligned_oldest_first() -> None:
+    newest_first = list(reversed(_auth_events()))
+    assert report.auth_table(newest_first, tz=UTC).splitlines() == [
+        "TIME                 SOURCE       RESULT    METHOD     USER",
+        "2026-10-28 12:00:00  203.0.113.5  failed    -          admin (no such user)",
+        "2026-10-28 12:00:01  203.0.113.5  failed    -          root",
+        "2026-10-28 12:00:02  192.0.2.10   accepted  publickey  alice",
+    ]
+    assert report.auth_table([]) == "no SSH logins stored yet\n"
+
+
+def test_usernames_cannot_send_terminal_escapes() -> None:
+    hostile = AuthEvent(T0, "203.0.113.5", "\x1b[2Jrooté", "failed", None, True, "m", "c")
+    line = report.auth_table([hostile], tz=UTC).splitlines()[1]
+    assert line.endswith("\\x1b[2Jroot\\xe9 (no such user)")
+    assert line.isascii() and "\x1b" not in line
+
+
+def test_auth_recent_and_alerts_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    env = {"NETWATCH_STATE_DIR": str(tmp_path)}
+    assert main(["alerts"], environ=env) == 1
+    assert "no database" in capsys.readouterr().err
+
+    with closing(storage.connect(tmp_path / ingest.DB_NAME)) as conn, storage.transaction(conn):
+        authdb.store_events(conn, _auth_events())
+        authdb.store_alerts(
+            conn, [Alert(T0 + 3, "ssh-brute-force", "warning", "203.0.113.5", "5 or more ...")]
+        )
+
+    assert main(["auth", "recent", "--failed"], environ=env) == 0
+    out = capsys.readouterr().out
+    assert "admin (no such user)" in out
+    assert "alice" not in out
+    assert main(["auth", "recent", "--source", "192.0.2.10", "-n", "1"], environ=env) == 0
+    assert len(capsys.readouterr().out.splitlines()) == 2
+    assert main(["alerts"], environ=env) == 0
+    [_, row] = capsys.readouterr().out.splitlines()
+    assert "warning   ssh-brute-force  5 or more ..." in row
