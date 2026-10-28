@@ -92,11 +92,16 @@ def schema_version(conn: sqlite3.Connection) -> int:
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     with transaction(conn):
-        conn.execute(
-            "INSERT INTO meta (key, value) VALUES (?, ?)"
-            " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
+        put_meta(conn, key, value)
+
+
+def put_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Like set_meta, but inside a transaction the caller already holds."""
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?)"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:

@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
-from netwatch import __version__, logsetup, skeleton
+from netwatch import __version__, ingest, logsetup, skeleton
 from netwatch.config import environ_with_env_file, load_settings, read_revision
 from netwatch.errors import NetwatchError
 
@@ -39,12 +39,21 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         description="Placeholder service that proves the deploy pipeline (replaced in Phase 1).",
     )
     skeleton_cmd.set_defaults(handler=_run_skeleton)
+
+    dns = commands.add_parser("dns", help="DNS logging and blocking").add_subparsers(
+        dest="dns_command", metavar="<dns command>", required=True
+    )
+    ingest_cmd = dns.add_parser(
+        "ingest",
+        help="follow dnsmasq's query log and store every query (the netwatch-dns service)",
+        description="Follow dnsmasq's journal and store every query until SIGTERM or SIGINT.",
+    )
+    ingest_cmd.set_defaults(handler=_run_ingest)
     return parser
 
 
-def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
-    settings = load_settings(environ)
-    logsetup.configure(settings.log_level, environ)
+def _stop_on_signals() -> threading.Event:
+    """An event that SIGTERM (systemd stop) and SIGINT (Ctrl+C) set."""
     stop = threading.Event()
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
@@ -53,7 +62,19 @@ def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    return skeleton.run(settings, stop)
+    return stop
+
+
+def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    return skeleton.run(settings, _stop_on_signals())
+
+
+def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    return ingest.run(settings, _stop_on_signals())
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
