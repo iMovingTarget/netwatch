@@ -1,0 +1,64 @@
+{"__CURSOR": "s=fixture;i=1", "__REALTIME_TIMESTAMP": "1793188068265282", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "started, version 2.91 cachesize 10000"}
+{"__CURSOR": "s=fixture;i=2", "__REALTIME_TIMESTAMP": "1793188068265328", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile"}
+{"__CURSOR": "s=fixture;i=3", "__REALTIME_TIMESTAMP": "1793188068265342", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "using nameserver 198.51.100.1#53"}
+{"__CURSOR": "s=fixture;i=4", "__REALTIME_TIMESTAMP": "1793188068265350", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "using nameserver 192.0.2.99#53 for domain dead.example "}
+{"__CURSOR": "s=fixture;i=5", "__REALTIME_TIMESTAMP": "1793188068265398", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "cleared cache"}
+{"__CURSOR": "s=fixture;i=6", "__REALTIME_TIMESTAMP": "1793188068265408", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "read /var/lib/netwatch-blocklist/blocklist.hosts - 4 names"}
+{"__CURSOR": "s=fixture;i=7", "__REALTIME_TIMESTAMP": "1793188069259032", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.10/42878 query[A] example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=8", "__REALTIME_TIMESTAMP": "1793188069259092", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.10/42878 forwarded example.com to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=9", "__REALTIME_TIMESTAMP": "1793188069259101", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.10/42878 reply example.com is 192.0.2.80"}
+{"__CURSOR": "s=fixture;i=a", "__REALTIME_TIMESTAMP": "1793188069482429", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "2 192.0.2.10/51262 query[A] example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=b", "__REALTIME_TIMESTAMP": "1793188069482489", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "2 192.0.2.10/51262 cached example.com is 192.0.2.80"}
+{"__CURSOR": "s=fixture;i=c", "__REALTIME_TIMESTAMP": "1793188069703536", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "3 192.0.2.11/43649 query[AAAA] example.org from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=d", "__REALTIME_TIMESTAMP": "1793188069703594", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "3 192.0.2.11/43649 forwarded example.org to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=e", "__REALTIME_TIMESTAMP": "1793188069703603", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "3 192.0.2.11/43649 reply example.org is 2001:db8::81"}
+{"__CURSOR": "s=fixture;i=f", "__REALTIME_TIMESTAMP": "1793188069928162", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "4 192.0.2.11/46585 query[A] www.example.net from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=10", "__REALTIME_TIMESTAMP": "1793188069928240", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "4 192.0.2.11/46585 forwarded www.example.net to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=11", "__REALTIME_TIMESTAMP": "1793188069928360", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "4 192.0.2.11/46585 reply www.example.net is <CNAME>"}
+{"__CURSOR": "s=fixture;i=12", "__REALTIME_TIMESTAMP": "1793188069928373", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "4 192.0.2.11/46585 reply example.net is 198.51.100.7"}
+{"__CURSOR": "s=fixture;i=13", "__REALTIME_TIMESTAMP": "1793188070152745", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "5 192.0.2.11/53161 query[A] www.example.net from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=14", "__REALTIME_TIMESTAMP": "1793188070152804", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "5 192.0.2.11/53161 cached www.example.net is <CNAME>"}
+{"__CURSOR": "s=fixture;i=15", "__REALTIME_TIMESTAMP": "1793188070152813", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "5 192.0.2.11/53161 cached example.net is 198.51.100.7"}
+{"__CURSOR": "s=fixture;i=16", "__REALTIME_TIMESTAMP": "1793188070375977", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "6 192.0.2.10/60387 query[A] multi.example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=17", "__REALTIME_TIMESTAMP": "1793188070376065", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "6 192.0.2.10/60387 forwarded multi.example.com to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=18", "__REALTIME_TIMESTAMP": "1793188070376076", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "6 192.0.2.10/60387 reply multi.example.com is 192.0.2.90"}
+{"__CURSOR": "s=fixture;i=19", "__REALTIME_TIMESTAMP": "1793188070376084", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "6 192.0.2.10/60387 reply multi.example.com is 192.0.2.91"}
+{"__CURSOR": "s=fixture;i=1a", "__REALTIME_TIMESTAMP": "1793188070599799", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "7 192.0.2.10/44168 query[A] nosuch.example from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=1b", "__REALTIME_TIMESTAMP": "1793188070599868", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "7 192.0.2.10/44168 forwarded nosuch.example to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=1c", "__REALTIME_TIMESTAMP": "1793188070599880", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "7 192.0.2.10/44168 reply nosuch.example is NXDOMAIN"}
+{"__CURSOR": "s=fixture;i=1d", "__REALTIME_TIMESTAMP": "1793188070823937", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "8 192.0.2.10/57932 query[A] ads.example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=1e", "__REALTIME_TIMESTAMP": "1793188070824007", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "8 192.0.2.10/57932 /var/lib/netwatch-blocklist/blocklist.hosts ads.example.com is 0.0.0.0"}
+{"__CURSOR": "s=fixture;i=1f", "__REALTIME_TIMESTAMP": "1793188071046509", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "9 192.0.2.10/60053 query[AAAA] ads.example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=20", "__REALTIME_TIMESTAMP": "1793188071046561", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "9 192.0.2.10/60053 /var/lib/netwatch-blocklist/blocklist.hosts ads.example.com is ::"}
+{"__CURSOR": "s=fixture;i=21", "__REALTIME_TIMESTAMP": "1793188071267638", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "10 192.0.2.10/46470 query[HTTPS] ads.example.com from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=22", "__REALTIME_TIMESTAMP": "1793188071267697", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "10 192.0.2.10/46470 forwarded ads.example.com to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=23", "__REALTIME_TIMESTAMP": "1793188071267706", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "10 192.0.2.10/46470 reply ads.example.com is NODATA"}
+{"__CURSOR": "s=fixture;i=24", "__REALTIME_TIMESTAMP": "1793188071492745", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "11 192.0.2.11/47311 query[TXT] example.com from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=25", "__REALTIME_TIMESTAMP": "1793188071492809", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "11 192.0.2.11/47311 forwarded example.com to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=26", "__REALTIME_TIMESTAMP": "1793188071492817", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "11 192.0.2.11/47311 reply example.com is v=spf1 -all"}
+{"__CURSOR": "s=fixture;i=27", "__REALTIME_TIMESTAMP": "1793188071715607", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "12 192.0.2.11/33843 query[PTR] 20.1.168.192.in-addr.arpa from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=28", "__REALTIME_TIMESTAMP": "1793188071715660", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "12 192.0.2.11/33843 config 192.168.1.20 is NXDOMAIN"}
+{"__CURSOR": "s=fixture;i=29", "__REALTIME_TIMESTAMP": "1793188071936658", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "13 192.0.2.11/35014 query[A] printer from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=2a", "__REALTIME_TIMESTAMP": "1793188071936722", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "13 192.0.2.11/35014 config printer is NXDOMAIN"}
+{"__CURSOR": "s=fixture;i=2b", "__REALTIME_TIMESTAMP": "1793188072158532", "_PID": "972", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "14 192.0.2.10/43161 query[A] example.org from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=2c", "__REALTIME_TIMESTAMP": "1793188072159112", "_PID": "972", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "14 192.0.2.10/43161 forwarded example.org to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=2d", "__REALTIME_TIMESTAMP": "1793188072159146", "_PID": "972", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "14 192.0.2.10/43161 reply example.org is 192.0.2.81"}
+{"__CURSOR": "s=fixture;i=2e", "__REALTIME_TIMESTAMP": "1793188072381494", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "114 192.0.2.10/48400 query[A] host.dead.example from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=2f", "__REALTIME_TIMESTAMP": "1793188072381555", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "114 192.0.2.10/48400 forwarded host.dead.example to 192.0.2.99"}
+{"__CURSOR": "s=fixture;i=30", "__REALTIME_TIMESTAMP": "1793188074600052", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "inotify: /var/lib/netwatch-blocklist/blocklist.hosts new or modified"}
+{"__CURSOR": "s=fixture;i=31", "__REALTIME_TIMESTAMP": "1793188074600106", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "inotify: flushed 4 names read from /var/lib/netwatch-blocklist/blocklist.hosts"}
+{"__CURSOR": "s=fixture;i=32", "__REALTIME_TIMESTAMP": "1793188074600126", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "read /var/lib/netwatch-blocklist/blocklist.hosts - 2 names"}
+{"__CURSOR": "s=fixture;i=33", "__REALTIME_TIMESTAMP": "1793188075610287", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "115 192.0.2.10/39791 query[A] tracker.example.org from 192.0.2.10"}
+{"__CURSOR": "s=fixture;i=34", "__REALTIME_TIMESTAMP": "1793188075610366", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "115 192.0.2.10/39791 forwarded tracker.example.org to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=35", "__REALTIME_TIMESTAMP": "1793188075610379", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "115 192.0.2.10/39791 reply tracker.example.org is 192.0.2.81"}
+{"__CURSOR": "s=fixture;i=36", "__REALTIME_TIMESTAMP": "1793188075832425", "_PID": "886", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "exiting on receipt of SIGTERM"}
+{"__CURSOR": "s=fixture;i=1", "__REALTIME_TIMESTAMP": "1793188076858548", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "started, version 2.91 cachesize 10000"}
+{"__CURSOR": "s=fixture;i=2", "__REALTIME_TIMESTAMP": "1793188076858585", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile"}
+{"__CURSOR": "s=fixture;i=3", "__REALTIME_TIMESTAMP": "1793188076858600", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "using nameserver 198.51.100.1#53"}
+{"__CURSOR": "s=fixture;i=4", "__REALTIME_TIMESTAMP": "1793188076858610", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "using nameserver 192.0.2.99#53 for domain dead.example "}
+{"__CURSOR": "s=fixture;i=5", "__REALTIME_TIMESTAMP": "1793188076858617", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "cleared cache"}
+{"__CURSOR": "s=fixture;i=6", "__REALTIME_TIMESTAMP": "1793188076858623", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "read /var/lib/netwatch-blocklist/blocklist.hosts - 2 names"}
+{"__CURSOR": "s=fixture;i=7", "__REALTIME_TIMESTAMP": "1793188077849416", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.11/42401 query[A] example.com from 192.0.2.11"}
+{"__CURSOR": "s=fixture;i=8", "__REALTIME_TIMESTAMP": "1793188077849491", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.11/42401 forwarded example.com to 198.51.100.1"}
+{"__CURSOR": "s=fixture;i=9", "__REALTIME_TIMESTAMP": "1793188077849503", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "1 192.0.2.11/42401 reply example.com is 192.0.2.80"}
+{"__CURSOR": "s=fixture;i=a", "__REALTIME_TIMESTAMP": "1793188078067929", "_PID": "991", "SYSLOG_IDENTIFIER": "dnsmasq", "MESSAGE": "exiting on receipt of SIGTERM"}

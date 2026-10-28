@@ -1,0 +1,4 @@
+# Names Netwatch never blocks, one per line. install.sh copies this file to
+# /etc/netwatch/allowlist.txt once; edit that copy, then run: netwatch blocklist update
+# Example (a false positive that breaks something you use):
+# metrics.example.com

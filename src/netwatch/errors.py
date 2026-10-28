@@ -21,3 +21,7 @@ class ConfigError(NetwatchError):
 
 class StorageError(NetwatchError):
     """The database can't be opened, or it was written by a newer Netwatch."""
+
+
+class BlocklistError(NetwatchError):
+    """A blocklist couldn't be downloaded, or the result failed a sanity check."""

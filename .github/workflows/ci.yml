@@ -42,50 +42,81 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install dnsmasq (the tests that run the real resolver need it)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q dnsmasq-base
       - run: pip install ".[dev]"
       - run: pytest
       - name: Smoke-test the installed entry point
         run: netwatch --version
 
   deploy:
-    name: deploy (shellcheck, unit hardening, install under systemd)
+    name: deploy (install, DNS end to end, uninstall under systemd)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Lint shell scripts
-        run: shellcheck deploy/*.sh
+        run: shellcheck deploy/*.sh deploy/bin/netwatch
       - name: Unit hardening stays at exposure 2.0 or lower
         run: systemd-analyze security --offline=yes --threshold=20 deploy/systemd/*.service
       - name: Prepare the runner
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q python3-venv
+          sudo apt-get install -y -q python3-venv dnsutils
           # install.sh runs as root and clones this checkout, which the runner user owns.
           sudo git config --system --add safe.directory "$GITHUB_WORKSPACE"
           # Give the commit under test a branch name so a plain clone carries it.
           git branch ci-under-test "$GITHUB_SHA"
+          # A documentation address for dnsmasq to answer on, as the VM answers on its LAN one.
+          sudo ip addr add 192.0.2.53/32 dev lo
+          sudo install -d -m 0750 /etc/netwatch
+          printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 |
+            sudo tee /etc/netwatch/netwatch.env
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
-      - name: Service runs hardened under systemd and stops cleanly
+      - name: Services run under systemd, dnsmasq only on the listen address
         run: |
           set -x
           for unit in deploy/systemd/*.service; do
             sudo systemd-analyze verify "/etc/systemd/system/$(basename "$unit")"
           done
-          systemctl status --no-pager netwatch-skeleton.service
-          sudo journalctl -u netwatch-skeleton.service --no-pager | grep "revision=$GITHUB_SHA"
-          sudo systemctl stop netwatch-skeleton.service
-          sudo journalctl -u netwatch-skeleton.service --no-pager | grep "netwatch.skeleton: stopped"
-          sudo ls -l /var/lib/netwatch/netwatch.db
+          systemctl is-active netwatch-dns.service dnsmasq.service netwatch-blocklist.timer
+          sudo ss -lnup | grep ':53 '
+          if sudo ss -lnup | grep ':53 ' | grep dnsmasq | grep -v '192.0.2.53:53'; then
+            echo "dnsmasq listens on more than the configured address"; exit 1
+          fi
+      - name: DNS answers and blocks, and every query is stored
+        run: |
+          set -x
+          netwatch blocklist status
+          netwatch dns check
+          dig +short @192.0.2.53 example.com
+          sleep 4
+          netwatch dns recent -n 20 | tee recent.txt
+          grep -E ' forwarded +example\.com ' recent.txt
+          grep -E ' blocked ' recent.txt
+          netwatch dns top
+      - name: Queries made while the logger is stopped are stored when it restarts
+        run: |
+          set -x
+          sudo systemctl stop netwatch-dns.service
+          dig +short @192.0.2.53 while-stopped.example.org || true
+          sudo systemctl start netwatch-dns.service
+          sleep 4
+          netwatch dns recent -n 50 | grep while-stopped.example.org
       - name: Re-installing the same commit reuses the build
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test | grep "reusing"
       - name: Uninstall --purge leaves nothing behind
         run: |
+          set -x
           sudo deploy/uninstall.sh --purge
-          test ! -e /opt/netwatch
-          test ! -e /etc/netwatch
-          test ! -e /var/lib/netwatch
+          if systemctl is-active --quiet dnsmasq.service; then echo "dnsmasq still running"; exit 1; fi
+          for path in /opt/netwatch /etc/netwatch /var/lib/netwatch /var/lib/netwatch-blocklist \
+                      /etc/dnsmasq.d/netwatch.conf /etc/systemd/system/dnsmasq.service.d/netwatch.conf \
+                      /usr/local/bin/netwatch; do
+            if [ -e "$path" ]; then echo "left behind: $path"; exit 1; fi
+          done
           if ls /etc/systemd/system/netwatch* 2>/dev/null; then echo "units left behind"; exit 1; fi
           if getent passwd netwatch; then echo "user left behind"; exit 1; fi

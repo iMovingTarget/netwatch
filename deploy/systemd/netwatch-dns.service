@@ -1,23 +1,25 @@
-# Phase 0 walking skeleton: proves the deploy pipeline before any features exist.
-# Replaced by the DNS service in Phase 1; install.sh then removes this unit.
+# Follows dnsmasq's query log in the journal and stores every query (netwatch dns ingest).
 [Unit]
-Description=Netwatch walking skeleton (deploy pipeline check)
+Description=Netwatch DNS query logger
 Documentation=https://github.com/iMovingTarget/netwatch
+After=dnsmasq.service
 
 [Service]
 Type=simple
 User=netwatch
 Group=netwatch
+# Reading the system journal needs this group, not root.
+SupplementaryGroups=systemd-journal
 EnvironmentFile=/etc/netwatch/netwatch.env
 EnvironmentFile=/opt/netwatch/current/revision.env
-ExecStart=/opt/netwatch/current/venv/bin/netwatch skeleton
+ExecStart=/opt/netwatch/current/venv/bin/netwatch dns ingest
 Restart=on-failure
 RestartSec=5s
 StateDirectory=netwatch
 StateDirectoryMode=0750
 UMask=0027
 
-# Sandboxing. The service only needs to read its code and write /var/lib/netwatch.
+# Sandboxing. It reads the journal and its code, and writes only /var/lib/netwatch.
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -26,7 +28,6 @@ ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 PrivateNetwork=yes
-PrivateUsers=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -34,7 +35,8 @@ ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
-ProcSubset=pid
+# No ProcSubset=pid here: journalctl reads /proc/sys/kernel/random/boot_id, which that setting
+# hides, and fails with "Failed to get boot ID".
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes

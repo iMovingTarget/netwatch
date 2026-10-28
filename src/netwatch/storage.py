@@ -22,6 +22,25 @@ BUSY_TIMEOUT_S = 5.0
 # Version -> statements that move the schema from version - 1 to version. Append only.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",),
+    2: (
+        # One row per client DNS query. ts_us is when dnsmasq logged the query (microseconds
+        # since the epoch, as the journal records it). The ingester may read the same journal
+        # lines twice after a restart; UNIQUE (ts_us, serial) makes storing them idempotent.
+        """CREATE TABLE dns_queries (
+            id INTEGER PRIMARY KEY,
+            ts_us INTEGER NOT NULL,
+            serial INTEGER NOT NULL,
+            client TEXT NOT NULL,
+            name TEXT NOT NULL,
+            qtype TEXT NOT NULL,
+            status TEXT NOT NULL,
+            answer TEXT,
+            upstream TEXT,
+            UNIQUE (ts_us, serial)
+        )""",
+        "CREATE INDEX dns_queries_status_ts ON dns_queries (status, ts_us)",
+        "CREATE INDEX dns_queries_client_ts ON dns_queries (client, ts_us)",
+    ),
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
@@ -73,11 +92,16 @@ def schema_version(conn: sqlite3.Connection) -> int:
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     with transaction(conn):
-        conn.execute(
-            "INSERT INTO meta (key, value) VALUES (?, ?)"
-            " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
+        put_meta(conn, key, value)
+
+
+def put_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Like set_meta, but inside a transaction the caller already holds."""
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?)"
+        " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
