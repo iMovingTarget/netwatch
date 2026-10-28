@@ -22,6 +22,25 @@ BUSY_TIMEOUT_S = 5.0
 # Version -> statements that move the schema from version - 1 to version. Append only.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",),
+    2: (
+        # One row per client DNS query. ts_us is when dnsmasq logged the query (microseconds
+        # since the epoch, as the journal records it). The ingester may read the same journal
+        # lines twice after a restart; UNIQUE (ts_us, serial) makes storing them idempotent.
+        """CREATE TABLE dns_queries (
+            id INTEGER PRIMARY KEY,
+            ts_us INTEGER NOT NULL,
+            serial INTEGER NOT NULL,
+            client TEXT NOT NULL,
+            name TEXT NOT NULL,
+            qtype TEXT NOT NULL,
+            status TEXT NOT NULL,
+            answer TEXT,
+            upstream TEXT,
+            UNIQUE (ts_us, serial)
+        )""",
+        "CREATE INDEX dns_queries_status_ts ON dns_queries (status, ts_us)",
+        "CREATE INDEX dns_queries_client_ts ON dns_queries (client, ts_us)",
+    ),
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
