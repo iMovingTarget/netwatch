@@ -66,6 +66,21 @@ def test_dns_defaults() -> None:
     assert settings.dns_retention_days == 30
 
 
+def test_auth_settings() -> None:
+    defaults = load_settings({})
+    assert (defaults.auth_max_failures, defaults.auth_window_minutes) == (5, 10)
+    assert defaults.auth_retention_days == 90
+    settings = load_settings(
+        {
+            "NETWATCH_AUTH_MAX_FAILURES": "3",
+            "NETWATCH_AUTH_WINDOW_MINUTES": "60",
+            "NETWATCH_AUTH_RETENTION_DAYS": "7",
+        }
+    )
+    assert (settings.auth_max_failures, settings.auth_window_minutes) == (3, 60)
+    assert settings.auth_retention_days == 7
+
+
 def test_dns_settings_are_comma_separated_and_validated() -> None:
     settings = load_settings(
         {
@@ -89,6 +104,9 @@ def test_dns_settings_are_comma_separated_and_validated() -> None:
         ("NETWATCH_DNS_UPSTREAMS", "1.1.1.1,dns.example", "not an IP address"),
         ("NETWATCH_BLOCKLIST_URLS", "http://example.com/hosts", "must be an https:// URL"),
         ("NETWATCH_DNS_RETENTION_DAYS", "0", "whole number of days"),
+        ("NETWATCH_AUTH_MAX_FAILURES", "five", "whole number of failures"),
+        ("NETWATCH_AUTH_WINDOW_MINUTES", "-1", "whole number of minutes"),
+        ("NETWATCH_AUTH_RETENTION_DAYS", "0", "whole number of days"),
     ],
 )
 def test_invalid_dns_settings_are_config_errors(key: str, value: str, message: str) -> None:

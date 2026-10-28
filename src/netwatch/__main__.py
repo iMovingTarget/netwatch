@@ -15,6 +15,7 @@ from types import FrameType
 
 from netwatch import (
     __version__,
+    authwatch,
     blocklist,
     dnsdb,
     dnsmasq,
@@ -90,6 +91,22 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     top_cmd.add_argument("-n", type=int, default=10, help="rows per list (default: 10)")
     top_cmd.set_defaults(handler=_dns_top)
 
+    auth = commands.add_parser("auth", help="SSH login monitoring").add_subparsers(
+        dest="auth_command", metavar="<auth command>", required=True
+    )
+    watch_cmd = auth.add_parser(
+        "watch",
+        help="follow sshd's log, store every login and raise alerts (the netwatch-auth service)",
+        description="Follow sshd's journal and store every failed and successful login until"
+        " SIGTERM or SIGINT, raising an alert on brute force.",
+    )
+    watch_cmd.add_argument(
+        "--from-file",
+        metavar="FILE",
+        help="store the logins in a saved `journalctl -o json` export of sshd's log and exit",
+    )
+    watch_cmd.set_defaults(handler=_run_auth_watch)
+
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
     )
@@ -131,6 +148,17 @@ def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
         print(f"stored {added} new queries from {args.from_file}")
         return 0
     return ingest.run(settings, _stop_on_signals())
+
+
+def _run_auth_watch(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    if args.from_file:
+        added, alerts = authwatch.import_file(settings, Path(args.from_file))
+        plural = "" if alerts == 1 else "s"
+        print(f"stored {added} new login events from {args.from_file}, {alerts} alert{plural}")
+        return 0
+    return authwatch.run(settings, _stop_on_signals())
 
 
 def _dns_config(args: argparse.Namespace, environ: Mapping[str, str]) -> int:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 UNITS = Path(__file__).resolve().parent.parent / "deploy" / "systemd"
 
 
@@ -16,14 +18,20 @@ def _settings(unit: str) -> dict[str, list[str]]:
     return values
 
 
-def test_dns_logger_can_read_the_boot_id() -> None:
+# Services that run journalctl to follow a log.
+JOURNAL_READERS = ("netwatch-dns.service", "netwatch-auth.service")
+
+
+@pytest.mark.parametrize("unit", JOURNAL_READERS)
+def test_journal_readers_can_read_the_boot_id(unit: str) -> None:
     # Regression: with ProcSubset=pid, /proc/sys is hidden and journalctl fails at start with
     # "Failed to get boot ID: No such file or directory", so netwatch-dns never ran on the VM.
-    assert "ProcSubset" not in _settings("netwatch-dns.service")
+    assert "ProcSubset" not in _settings(unit)
 
 
-def test_dns_logger_is_in_the_journal_group_and_offline() -> None:
-    settings = _settings("netwatch-dns.service")
+@pytest.mark.parametrize("unit", JOURNAL_READERS)
+def test_journal_readers_are_in_the_journal_group_and_offline(unit: str) -> None:
+    settings = _settings(unit)
     assert settings["SupplementaryGroups"] == ["systemd-journal"]
     assert settings["PrivateNetwork"] == ["yes"]
     assert settings["User"] == ["netwatch"]
