@@ -11,6 +11,7 @@ in tests.
 from __future__ import annotations
 
 import ipaddress
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,9 @@ DEFAULT_ALLOWLIST_FILE = "/etc/netwatch/allowlist.txt"
 DEFAULT_UPSTREAMS = ("1.1.1.1", "9.9.9.9")
 DEFAULT_BLOCKLIST_URLS = ("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",)
 DEFAULT_RETENTION_DAYS = 30
+
+#: Written by install.sh into each release directory, next to its virtualenv.
+REVISION_FILE = "revision.env"
 
 
 @dataclass(frozen=True)
@@ -64,9 +68,23 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
     )
 
 
-def read_revision(environ: Mapping[str, str]) -> str | None:
-    """The git commit the installer deployed (NETWATCH_REVISION), or None outside a deploy."""
-    return environ.get("NETWATCH_REVISION", "").strip() or None
+def read_revision(environ: Mapping[str, str], release_dir: Path | None = None) -> str | None:
+    """The git commit the installer deployed, or None outside a deploy.
+
+    Services get NETWATCH_REVISION from their EnvironmentFile. The CLI started from a shell
+    doesn't, so it falls back to the revision.env install.sh wrote into the release directory,
+    which holds the virtualenv this Python runs from (``release_dir`` replaces it in tests).
+    """
+    revision = environ.get("NETWATCH_REVISION", "").strip()
+    if revision:
+        return revision
+    if release_dir is None:
+        release_dir = Path(sys.prefix).parent
+    try:
+        values = read_env_file(str(release_dir / REVISION_FILE))
+    except ConfigError:
+        return None
+    return values.get("NETWATCH_REVISION", "").strip() or None
 
 
 def read_env_file(path: str) -> dict[str, str]:

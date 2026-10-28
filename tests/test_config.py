@@ -43,9 +43,17 @@ def test_unknown_log_level_is_a_config_error() -> None:
         load_settings({"STATE_DIRECTORY": "/x", "NETWATCH_LOG_LEVEL": "loud"})
 
 
-def test_revision_is_optional() -> None:
-    assert read_revision({}) is None
-    assert read_revision({"NETWATCH_REVISION": " abc123 "}) == "abc123"
+def test_revision_is_optional(tmp_path: Path) -> None:
+    assert read_revision({}, release_dir=tmp_path) is None
+    assert read_revision({"NETWATCH_REVISION": " abc123 "}, release_dir=tmp_path) == "abc123"
+
+
+def test_revision_falls_back_to_the_release_directory(tmp_path: Path) -> None:
+    # Regression: `netwatch --version` from a shell showed no revision, because only the
+    # services load revision.env.
+    (tmp_path / "revision.env").write_text("NETWATCH_REVISION=feedface\nNETWATCH_REF=v0.2.0\n")
+    assert read_revision({}, release_dir=tmp_path) == "feedface"
+    assert read_revision({"NETWATCH_REVISION": "abc123"}, release_dir=tmp_path) == "abc123"
 
 
 def test_dns_defaults() -> None:

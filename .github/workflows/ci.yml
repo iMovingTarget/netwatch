@@ -76,6 +76,8 @@ jobs:
             sudo tee /etc/netwatch/netwatch.env
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
+      - name: The CLI from a shell reports the deployed revision
+        run: netwatch --version | grep -F "(revision ${GITHUB_SHA:0:12})"
       - name: Services run under systemd, dnsmasq only on the listen address
         run: |
           set -x
