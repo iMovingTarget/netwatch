@@ -10,14 +10,15 @@ failed and successful login, and raises an alert when one address keeps failing,
 one if that address then gets in. Since Phase 1, dnsmasq answers DNS for the devices pointed at
 the host and blocks ad, tracking and malware domains, and Netwatch stores every query.
 
-From a test on the VM: six failed logins from the admin PC as unknown users, then a normal key
-login from the same PC (address and account name replaced with documentation ones):
+From a test on the VM: six failed logins from the admin PC as unknown users, then two normal key
+logins from the same PC (address and account name replaced with documentation ones). The second
+login raises nothing: it is the same incident.
 
 ```
 $ netwatch alerts
 TIME                 SEVERITY  KIND                      MESSAGE
-2026-10-28 17:04:45  warning   ssh-brute-force           5 or more failed SSH logins from 192.0.2.10 within 10 minutes (latest as 'nwdemo5')
-2026-10-28 17:04:49  critical  ssh-login-after-failures  successful SSH login as 'alice' from 192.0.2.10 after a brute-force alert for it within 10 minutes
+2026-10-28 17:15:01  warning   ssh-brute-force           5 or more failed SSH logins from 192.0.2.10 within 10 minutes (latest as 'nwdemo5')
+2026-10-28 17:15:05  critical  ssh-login-after-failures  successful SSH login as 'alice' from 192.0.2.10 after a brute-force alert for it within 10 minutes
 ```
 
 ## What it does
@@ -135,9 +136,10 @@ for the LAN address):
 install: setting up dnsmasq on 192.0.2.53
 install: installing dnsmasq
 install: downloading the first blocklist
-192.0.2.53: example.com A -> NOERROR 104.20.23.154, 172.66.147.243 (4 ms)
+192.0.2.53: example.com A -> NOERROR 172.66.147.243, 104.20.23.154 (10 ms)
 192.0.2.53: 0.0.0.0.creative.hpyrdr.com A -> NOERROR 0.0.0.0 (blocked)
-install: installed netwatch 0.1.0 (revision 1ca6f01f9788) from ci-under-test
+install: installed netwatch 0.3.0 (revision a9ec96d438a1) from ci-under-test
+install:   netwatch-auth.service: active
 install:   netwatch-dns.service: active
 install:   netwatch-blocklist.timer: active
 ```
