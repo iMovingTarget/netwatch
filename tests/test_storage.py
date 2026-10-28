@@ -45,3 +45,22 @@ def test_failed_transaction_is_rolled_back(tmp_path: Path) -> None:
             conn.execute("INSERT INTO meta (key, value) VALUES ('k', 'v')")
             raise RuntimeError("boom")
         assert storage.get_meta(conn, "k") is None
+
+
+def test_upgrade_from_an_older_schema_keeps_existing_rows(tmp_path: Path) -> None:
+    # A database written by v0.2.0 (schema 2), as on the VM, must upgrade in place.
+    db = tmp_path / "nw.db"
+    with closing(sqlite3.connect(db)) as raw:
+        for version in (1, 2):
+            for statement in storage.MIGRATIONS[version]:
+                raw.execute(statement)
+        raw.execute(
+            "INSERT INTO dns_queries (ts_us, serial, client, name, qtype, status)"
+            " VALUES (1, 1, '192.0.2.10', 'example.com', 'A', 'forwarded')"
+        )
+        raw.execute("PRAGMA user_version = 2")
+        raw.commit()
+    with closing(storage.connect(db)) as conn:
+        assert storage.schema_version(conn) == storage.SCHEMA_VERSION
+        assert conn.execute("SELECT count(*) FROM dns_queries").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM auth_events").fetchone()[0] == 0

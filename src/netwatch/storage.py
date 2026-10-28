@@ -41,6 +41,36 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX dns_queries_status_ts ON dns_queries (status, ts_us)",
         "CREATE INDEX dns_queries_client_ts ON dns_queries (client, ts_us)",
     ),
+    3: (
+        # One row per failed or successful SSH login. cursor is the journal entry's cursor,
+        # unique per entry, so storing the same entry twice is a no-op.
+        """CREATE TABLE auth_events (
+            id INTEGER PRIMARY KEY,
+            ts_us INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            username TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            method TEXT,
+            invalid_user INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            cursor TEXT NOT NULL UNIQUE
+        )""",
+        "CREATE INDEX auth_events_ts ON auth_events (ts_us)",
+        "CREATE INDEX auth_events_source_ts ON auth_events (source, ts_us)",
+        # Alerts from every detector. subject is what an alert is about (an address, a
+        # device). notified_us is set by the alerting service once it has sent the alert.
+        """CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY,
+            ts_us INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            notified_us INTEGER
+        )""",
+        "CREATE INDEX alerts_ts ON alerts (ts_us)",
+        "CREATE INDEX alerts_kind_ts ON alerts (kind, ts_us)",
+    ),
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 

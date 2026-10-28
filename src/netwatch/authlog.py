@@ -27,6 +27,7 @@ OUTCOME_ACCEPTED = "accepted"
 
 KIND_BRUTE_FORCE = "ssh-brute-force"
 KIND_LOGIN_AFTER_FAILURES = "ssh-login-after-failures"
+ALERT_KINDS = (KIND_BRUTE_FORCE, KIND_LOGIN_AFTER_FAILURES)
 SEVERITY_WARNING = "warning"
 SEVERITY_CRITICAL = "critical"
 

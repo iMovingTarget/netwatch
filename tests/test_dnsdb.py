@@ -98,6 +98,6 @@ def test_migration_from_version_1_keeps_meta(tmp_path: Path) -> None:
             "PRAGMA user_version = 1;"
         )
     with closing(storage.connect(db)) as conn:
-        assert storage.schema_version(conn) == 2
+        assert storage.schema_version(conn) == storage.SCHEMA_VERSION
         assert storage.get_meta(conn, "skeleton.revision") == "abc"
         assert dnsdb.recent(conn, 1) == []
