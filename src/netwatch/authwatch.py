@@ -19,7 +19,14 @@ from contextlib import closing
 from pathlib import Path
 
 from netwatch import authdb, journal, storage
-from netwatch.authlog import ALERT_KINDS, KIND_BRUTE_FORCE, Alert, AuthEvent, AuthMonitor
+from netwatch.authlog import (
+    ALERT_KINDS,
+    KIND_BRUTE_FORCE,
+    KIND_LOGIN_AFTER_FAILURES,
+    Alert,
+    AuthEvent,
+    AuthMonitor,
+)
 from netwatch.config import Settings
 from netwatch.errors import NetwatchError
 from netwatch.ingest import DB_NAME
@@ -42,6 +49,7 @@ def new_monitor(conn: sqlite3.Connection, settings: Settings, now_us: int) -> Au
     monitor.restore(
         failures=authdb.failures_since(conn, since_us),
         alerts=authdb.alert_subjects_since(conn, KIND_BRUTE_FORCE, since_us),
+        login_alerts=authdb.alert_subjects_since(conn, KIND_LOGIN_AFTER_FAILURES, since_us),
     )
     return monitor
 

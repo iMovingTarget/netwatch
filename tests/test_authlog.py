@@ -130,3 +130,22 @@ def test_restore_continues_the_window_across_a_restart() -> None:
     monitor.restore(failures=[], alerts=[(ATTACKER, 5)])
     assert _feed(monitor, [_failure(10, 4010), _failure(11, 4011)]) == []
     assert [a.kind for a in _feed(monitor, [_login(12)])] == [KIND_LOGIN_AFTER_FAILURES]
+
+
+def test_one_login_alert_per_brute_force_alert() -> None:
+    # Regression, found on the VM: every later login from the address raised another critical
+    # alert (three in 25 seconds), which Phase 4 would have sent as three Telegram messages.
+    monitor = AuthMonitor(max_failures=3, window_minutes=10)
+    _feed(monitor, [_failure(i, 4000 + i) for i in range(3)])
+    alerts = _feed(monitor, [_login(10), _login(20), _login(30)])
+    assert [a.kind for a in alerts] == [KIND_LOGIN_AFTER_FAILURES]
+    # A new brute-force alert (after the cooldown) re-arms the check.
+    later = 11 * MINUTE_US
+    alerts = _feed(monitor, [_failure(later + i, 5000 + i) for i in range(3)] + [_login(later + 9)])
+    assert [a.kind for a in alerts] == [KIND_BRUTE_FORCE, KIND_LOGIN_AFTER_FAILURES]
+
+
+def test_restore_remembers_that_the_login_was_reported() -> None:
+    monitor = AuthMonitor(max_failures=2, window_minutes=10)
+    monitor.restore(failures=[], alerts=[(ATTACKER, 5)], login_alerts=[(ATTACKER, 7)])
+    assert _feed(monitor, [_login(12)]) == []
