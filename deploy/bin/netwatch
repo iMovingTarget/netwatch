@@ -1,0 +1,9 @@
+#!/bin/sh
+# Installed as /usr/local/bin/netwatch. Runs the netwatch CLI as the netwatch user, so files it
+# creates (the database's WAL and shared-memory files, a new blocklist) belong to the user the
+# services run as. If root created them, the services could no longer open the database.
+cli=/opt/netwatch/current/venv/bin/netwatch
+if [ "$(id -un)" = netwatch ]; then
+    exec "$cli" "$@"
+fi
+exec sudo -u netwatch -- "$cli" "$@"

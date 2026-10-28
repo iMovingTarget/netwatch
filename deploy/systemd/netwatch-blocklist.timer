@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Netwatch blocklist update
+Documentation=https://github.com/iMovingTarget/netwatch
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+# Catch up after the host was off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

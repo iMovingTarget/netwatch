@@ -21,7 +21,6 @@ from netwatch import (
     ingest,
     logsetup,
     report,
-    skeleton,
     storage,
 )
 from netwatch.config import environ_with_env_file, load_settings, read_revision
@@ -45,13 +44,6 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=version_string(environ))
     commands = parser.add_subparsers(dest="command", metavar="<command>")
-
-    skeleton_cmd = commands.add_parser(
-        "skeleton",
-        help="run the Phase 0 placeholder service until SIGTERM or SIGINT",
-        description="Placeholder service that proves the deploy pipeline (replaced in Phase 1).",
-    )
-    skeleton_cmd.set_defaults(handler=_run_skeleton)
 
     dns = commands.add_parser("dns", help="DNS logging and blocking").add_subparsers(
         dest="dns_command", metavar="<dns command>", required=True
@@ -123,12 +115,6 @@ def _stop_on_signals() -> threading.Event:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     return stop
-
-
-def _run_skeleton(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
-    settings = load_settings(environ)
-    logsetup.configure(settings.log_level, environ)
-    return skeleton.run(settings, _stop_on_signals())
 
 
 def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
