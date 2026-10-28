@@ -34,8 +34,27 @@ sudo deploy/install.sh v0.1.0      # any tag, branch or commit
 ```
 
 Installing an older ref switches `/opt/netwatch/current` back atomically and installs that
-version's units. v0.1.0 has no DNS service, so this also removes `netwatch-dns`; run step 4 as
-well to stop dnsmasq.
+version's units, removing the ones it doesn't ship. v0.1.0 has no DNS service, so this also
+removes `netwatch-dns`; run step 4 as well to stop dnsmasq.
+
+**Across a database upgrade.** A release refuses a database written by a newer schema, so after
+going back from v0.3.0 (schema 3) to v0.2.0 (schema 2), `netwatch-dns` keeps restarting with
+"database schema version 3 is newer than this Netwatch supports (2)". dnsmasq keeps answering;
+only logging stops. `install.sh` reports the failed service and prints the command to go
+forward again. To stay on the older release instead, set the database aside and let it start an
+empty one:
+
+```
+d=/var/lib/netwatch
+sudo systemctl stop netwatch-dns
+for f in netwatch.db netwatch.db-wal netwatch.db-shm; do
+    if sudo test -e "$d/$f"; then sudo mv "$d/$f" "$d/$f.saved"; fi
+done
+sudo systemctl start netwatch-dns
+```
+
+To get the history back later: install the newer release again, stop `netwatch-dns` and
+`netwatch-auth`, move the `.saved` files back over the new ones, and start both services.
 
 ## 4. Remove Netwatch from the host
 
@@ -69,3 +88,7 @@ renews (reconnecting to Wi-Fi forces it).
   all came back on their own, with no failed units.
 - Steps 2 to 4 are exercised on every pull request by CI's deploy job (stop and restart of the
   logger, reinstall, uninstall `--purge` on a real systemd host).
+- Later that day, step 3 across a database upgrade: from the Phase 2 release candidate back to
+  v0.2.0. `netwatch-dns` failed as described and dnsmasq kept answering; with the database set
+  aside v0.2.0 ran on an empty one; going forward again and moving the database back restored
+  every stored query, login and alert, with no failed units.
