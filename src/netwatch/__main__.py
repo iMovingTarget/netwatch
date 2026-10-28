@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
-from netwatch import __version__, ingest, logsetup, skeleton
+from netwatch import __version__, blocklist, ingest, logsetup, skeleton
 from netwatch.config import environ_with_env_file, load_settings, read_revision
 from netwatch.errors import NetwatchError
 
@@ -49,6 +49,24 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         description="Follow dnsmasq's journal and store every query until SIGTERM or SIGINT.",
     )
     ingest_cmd.set_defaults(handler=_run_ingest)
+
+    bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
+        dest="blocklist_command", metavar="<blocklist command>", required=True
+    )
+    update_cmd = bl.add_parser(
+        "update",
+        help="download the blocklists and install the result (the netwatch-blocklist service)",
+        description="Download NETWATCH_BLOCKLIST_URLS, remove allowlisted names, check the"
+        " result and swap it into place for dnsmasq.",
+    )
+    update_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="install the result even if it is suspiciously small or shrank by more than half",
+    )
+    update_cmd.set_defaults(handler=_blocklist_update)
+    status_cmd = bl.add_parser("status", help="show when the blocklist was updated and its size")
+    status_cmd.set_defaults(handler=_blocklist_status)
     return parser
 
 
@@ -75,6 +93,30 @@ def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     settings = load_settings(environ)
     logsetup.configure(settings.log_level, environ)
     return ingest.run(settings, _stop_on_signals())
+
+
+def _blocklist_update(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    result = blocklist.update(settings, force=args.force)
+    was = f" (was {result.previous})" if result.previous is not None else ""
+    print(f"blocklist: {result.domains} domains{was}, {result.allowed} allowlisted")
+    return 0
+
+
+def _blocklist_status(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    path = settings.blocklist_dir / blocklist.HOSTS_FILE
+    header = blocklist.read_header(path)
+    if header is None:
+        print(f"no blocklist at {path} (run: netwatch blocklist update)", file=sys.stderr)
+        return 1
+    print(f"file:      {path}")
+    print(f"generated: {header.generated or 'unknown'}")
+    print(f"domains:   {header.domains if header.domains is not None else 'unknown'}")
+    for source in header.sources:
+        print(f"source:    {source}")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:

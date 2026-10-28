@@ -22,6 +22,7 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 DEFAULT_ENV_FILE = "/etc/netwatch/netwatch.env"
 DEFAULT_STATE_DIR = "/var/lib/netwatch"
 DEFAULT_BLOCKLIST_DIR = "/var/lib/netwatch-blocklist"
+DEFAULT_ALLOWLIST_FILE = "/etc/netwatch/allowlist.txt"
 DEFAULT_UPSTREAMS = ("1.1.1.1", "9.9.9.9")
 DEFAULT_BLOCKLIST_URLS = ("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",)
 DEFAULT_RETENTION_DAYS = 30
@@ -37,6 +38,7 @@ class Settings:
     dns_upstreams: tuple[str, ...]
     blocklist_urls: tuple[str, ...]
     blocklist_dir: Path
+    allowlist_file: Path  # names never to block, one per line
     dns_retention_days: int
 
 
@@ -52,6 +54,9 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         blocklist_urls=_urls(environ, "NETWATCH_BLOCKLIST_URLS", DEFAULT_BLOCKLIST_URLS),
         blocklist_dir=Path(
             environ.get("NETWATCH_BLOCKLIST_DIR", "").strip() or DEFAULT_BLOCKLIST_DIR
+        ),
+        allowlist_file=Path(
+            environ.get("NETWATCH_ALLOWLIST_FILE", "").strip() or DEFAULT_ALLOWLIST_FILE
         ),
         dns_retention_days=_positive_int(
             environ, "NETWATCH_DNS_RETENTION_DAYS", DEFAULT_RETENTION_DAYS
