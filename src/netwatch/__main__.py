@@ -7,10 +7,23 @@ import os
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import closing
 from types import FrameType
 
-from netwatch import __version__, blocklist, dnsmasq, dnsprobe, ingest, logsetup, skeleton
+from netwatch import (
+    __version__,
+    blocklist,
+    dnsdb,
+    dnsmasq,
+    dnsprobe,
+    ingest,
+    logsetup,
+    report,
+    skeleton,
+    storage,
+)
 from netwatch.config import environ_with_env_file, load_settings, read_revision
 from netwatch.errors import ConfigError, NetwatchError
 
@@ -69,6 +82,15 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         "--type", choices=sorted(dnsprobe.QTYPES), default="A", help="record type (default: A)"
     )
     check_cmd.set_defaults(handler=_dns_check)
+    recent_cmd = dns.add_parser("recent", help="show the most recent queries")
+    recent_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    recent_cmd.add_argument("--client", help="only queries from this client address")
+    recent_cmd.add_argument("--blocked", action="store_true", help="only blocked queries")
+    recent_cmd.set_defaults(handler=_dns_recent)
+    top_cmd = dns.add_parser("top", help="summarise recent queries: counts, top names and clients")
+    top_cmd.add_argument("--hours", type=int, default=24, help="time window (default: 24)")
+    top_cmd.add_argument("-n", type=int, default=10, help="rows per list (default: 10)")
+    top_cmd.set_defaults(handler=_dns_top)
 
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
@@ -146,6 +168,28 @@ def _dns_check(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
             )
             ok = ok and is_blocked
     return 0 if ok else 1
+
+
+def _open_db(environ: Mapping[str, str]) -> closing[storage.sqlite3.Connection]:
+    settings = load_settings(environ)
+    path = settings.state_dir / ingest.DB_NAME
+    if not path.exists():
+        raise NetwatchError(f"no database at {path} (is netwatch-dns running?)")
+    return closing(storage.connect(path))
+
+
+def _dns_recent(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        queries = dnsdb.recent(conn, args.n, client=args.client, blocked_only=args.blocked)
+    print(report.recent_table(queries), end="")
+    return 0
+
+
+def _dns_top(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    since_us = time.time_ns() // 1000 - args.hours * 3_600_000_000
+    with _open_db(environ) as conn:
+        print(report.summary(conn, since_us, args.hours, args.n), end="")
+    return 0
 
 
 def _blocklist_update(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
