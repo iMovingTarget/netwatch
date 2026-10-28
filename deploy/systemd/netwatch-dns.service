@@ -35,7 +35,8 @@ ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
-ProcSubset=pid
+# No ProcSubset=pid here: journalctl reads /proc/sys/kernel/random/boot_id, which that setting
+# hides, and fails with "Failed to get boot ID".
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes
