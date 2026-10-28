@@ -158,7 +158,7 @@ def run(
 ) -> int:
     """Follow the journal until ``stop`` is set. Returns the exit code."""
     with closing(storage.connect(settings.state_dir / DB_NAME)) as conn:
-        assembler = QueryAssembler(str(settings.blocklist_dir))
+        assembler = QueryAssembler(settings.blocklist_dir.as_posix())
         ingester = Ingester(conn, assembler, settings.dns_retention_days)
         cmd = command or journal_command(ingester.saved_cursor)
         log.info(

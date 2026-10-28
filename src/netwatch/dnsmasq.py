@@ -38,6 +38,7 @@ def render_config(settings: Settings) -> str:
         "log-async=25",
         "",
         "# Netwatch's blocklist. dnsmasq re-reads changed files in this directory itself.",
-        f"hostsdir={settings.blocklist_dir}",
+        # as_posix(): the file is for Linux even when rendered on Windows during development.
+        f"hostsdir={settings.blocklist_dir.as_posix()}",
     ]
     return "\n".join(lines) + "\n"
