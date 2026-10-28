@@ -135,6 +135,18 @@ def read_header(path: Path) -> Header | None:
     )
 
 
+def first_domain(path: Path) -> str | None:
+    """Some name the blocklist file blocks (the first), for a smoke test."""
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("0.0.0.0 "):
+                    return line.split()[1]
+    except FileNotFoundError:
+        pass
+    return None
+
+
 def current_count(path: Path) -> int | None:
     """The domain count recorded in an existing blocklist file's header."""
     header = read_header(path)

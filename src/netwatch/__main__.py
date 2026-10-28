@@ -10,9 +10,9 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
-from netwatch import __version__, blocklist, ingest, logsetup, skeleton
+from netwatch import __version__, blocklist, dnsmasq, dnsprobe, ingest, logsetup, skeleton
 from netwatch.config import environ_with_env_file, load_settings, read_revision
-from netwatch.errors import NetwatchError
+from netwatch.errors import ConfigError, NetwatchError
 
 Handler = Callable[[argparse.Namespace, Mapping[str, str]], int]
 
@@ -49,6 +49,26 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         description="Follow dnsmasq's journal and store every query until SIGTERM or SIGINT.",
     )
     ingest_cmd.set_defaults(handler=_run_ingest)
+    config_cmd = dns.add_parser(
+        "config",
+        help="print the dnsmasq configuration for the current settings",
+        description=f"Print the dnsmasq configuration that install.sh writes to"
+        f" {dnsmasq.CONFIG_PATH}.",
+    )
+    config_cmd.set_defaults(handler=_dns_config)
+    check_cmd = dns.add_parser(
+        "check",
+        help="query the resolver: forwarding works and a blocklisted name is blocked",
+        description="Send test queries to the resolver. Without --name, also checks that the"
+        " first name on the blocklist is answered with 0.0.0.0.",
+    )
+    check_cmd.add_argument("--server", help="resolver address (default: first NETWATCH_DNS_LISTEN)")
+    check_cmd.add_argument("--port", type=int, default=53, help="resolver port (default: 53)")
+    check_cmd.add_argument("--name", help="name to look up (default: example.com)")
+    check_cmd.add_argument(
+        "--type", choices=sorted(dnsprobe.QTYPES), default="A", help="record type (default: A)"
+    )
+    check_cmd.set_defaults(handler=_dns_check)
 
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
@@ -93,6 +113,39 @@ def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     settings = load_settings(environ)
     logsetup.configure(settings.log_level, environ)
     return ingest.run(settings, _stop_on_signals())
+
+
+def _dns_config(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    print(dnsmasq.render_config(load_settings(environ)), end="")
+    return 0
+
+
+def _dns_check(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    server = args.server or (settings.dns_listen[0] if settings.dns_listen else None)
+    if server is None:
+        raise ConfigError("no resolver to check: pass --server or set NETWATCH_DNS_LISTEN")
+    ok = True
+    name = args.name or "example.com"
+    reply = dnsprobe.query(server, name, args.type, port=args.port)
+    answers = ", ".join(reply.answers) or "no records"
+    print(f"{server}: {name} {args.type} -> {reply.rcode} {answers} ({reply.elapsed_ms:.0f} ms)")
+    if reply.rcode not in ("NOERROR", "NXDOMAIN"):
+        ok = False
+    if args.name is None:
+        blocked = blocklist.first_domain(settings.blocklist_dir / blocklist.HOSTS_FILE)
+        if blocked is None:
+            print("no blocklist yet, so blocking was not checked")
+        else:
+            reply = dnsprobe.query(server, blocked, "A", port=args.port)
+            is_blocked = reply.answers == ("0.0.0.0",)
+            verdict = "blocked" if is_blocked else "NOT BLOCKED"
+            print(
+                f"{server}: {blocked} A -> {reply.rcode} {', '.join(reply.answers) or 'no records'}"
+                f" ({verdict})"
+            )
+            ok = ok and is_blocked
+    return 0 if ok else 1
 
 
 def _blocklist_update(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
