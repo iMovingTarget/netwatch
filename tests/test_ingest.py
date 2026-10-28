@@ -17,6 +17,7 @@ import pytest
 
 import netwatch
 from netwatch import dnsdb, ingest, storage
+from netwatch.__main__ import main
 from netwatch.config import load_settings
 from netwatch.dnslog import QueryAssembler
 from netwatch.errors import NetwatchError
@@ -180,3 +181,13 @@ def test_service_stores_everything_and_stops_cleanly_on_sigterm(tmp_path: Path) 
     err = proc.stderr.read().decode() if proc.stderr else ""
     assert "following dnsmasq.service from now" in err
     assert "stopped after storing 17 queries" in err
+
+
+def test_import_file_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    env = {"NETWATCH_STATE_DIR": str(tmp_path / "state")}
+    assert main(["dns", "ingest", "--from-file", str(FIXTURE)], environ=env) == 0
+    assert capsys.readouterr().out.strip() == f"stored 17 new queries from {FIXTURE}"
+    assert main(["dns", "ingest", "--from-file", str(FIXTURE)], environ=env) == 0
+    assert capsys.readouterr().out.startswith("stored 0 new queries")
+    assert main(["dns", "ingest", "--from-file", str(tmp_path / "missing.jsonl")], environ=env) == 1
+    assert capsys.readouterr().err.startswith("netwatch: cannot read")

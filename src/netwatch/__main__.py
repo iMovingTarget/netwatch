@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
+from pathlib import Path
 from types import FrameType
 
 from netwatch import (
@@ -52,6 +53,11 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         "ingest",
         help="follow dnsmasq's query log and store every query (the netwatch-dns service)",
         description="Follow dnsmasq's journal and store every query until SIGTERM or SIGINT.",
+    )
+    ingest_cmd.add_argument(
+        "--from-file",
+        metavar="FILE",
+        help="store the queries in a saved `journalctl -o json` export and exit",
     )
     ingest_cmd.set_defaults(handler=_run_ingest)
     config_cmd = dns.add_parser(
@@ -120,6 +126,10 @@ def _stop_on_signals() -> threading.Event:
 def _run_ingest(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     settings = load_settings(environ)
     logsetup.configure(settings.log_level, environ)
+    if args.from_file:
+        added = ingest.import_file(settings, Path(args.from_file))
+        print(f"stored {added} new queries from {args.from_file}")
+        return 0
     return ingest.run(settings, _stop_on_signals())
 
 

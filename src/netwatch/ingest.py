@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import closing
+from pathlib import Path
 
 from netwatch import dnsdb, storage
 from netwatch.config import Settings
@@ -148,6 +149,29 @@ class _LineReader:
 
     def close(self) -> None:
         self._selector.close()
+
+
+def import_file(settings: Settings, path: Path) -> int:
+    """Store the queries in a saved ``journalctl -o json`` export. Returns how many were new.
+
+    For trying Netwatch without dnsmasq (examples/dnsmasq-journal.jsonl) and for loading a log
+    exported from another host. The saved cursor is left alone: it belongs to the live journal.
+    """
+    try:
+        lines = path.read_bytes().splitlines()
+    except OSError as exc:
+        raise NetwatchError(f"cannot read {path}: {exc.strerror}") from exc
+    settings.state_dir.mkdir(parents=True, exist_ok=True)
+    with closing(storage.connect(settings.state_dir / DB_NAME)) as conn:
+        assembler = QueryAssembler(settings.blocklist_dir.as_posix())
+        done: list[DnsQuery] = []
+        for line in lines:
+            parsed = parse_record(line)
+            if parsed is not None:
+                done += assembler.feed(*parsed)
+        done += assembler.flush_all()
+        with storage.transaction(conn):
+            return dnsdb.store(conn, done)
 
 
 def run(
