@@ -5,7 +5,7 @@ LAN. It is built in phases: DNS logging and blocking, live detection of failed S
 device inventory with alerts for unknown devices, Telegram notifications, and a small read-only
 dashboard. Each phase ships as a tagged release.
 
-**Status: Phase 1, DNS logger and sinkhole.** dnsmasq answers DNS for the devices pointed at it
+**Status: v0.2.0 (Phase 1, DNS logger and sinkhole).** dnsmasq answers DNS for the devices pointed at it
 and blocks ad, tracking and malware domains from a daily-updated blocklist. Netwatch configures
 dnsmasq, keeps the blocklist current, and stores every query with its time, client, name, type
 and answer or "blocked".
@@ -22,7 +22,7 @@ TIME                 CLIENT      TYPE  STATUS   NAME             ANSWER
 | Phase | Release | What | Status |
 |---|---|---|---|
 | 0 | v0.1.0 | Install script, hardened units, CI install test, storage and logging base | done |
-| 1 | v0.2.0 | DNS logger and sinkhole: dnsmasq answers, Netwatch logs every query and manages blocklists | in progress |
+| 1 | v0.2.0 | DNS logger and sinkhole: dnsmasq answers, Netwatch logs every query and manages blocklists | done |
 | 2 | v0.3.0 | Live failed-login detection for sshd, reusing [log-analyzer](https://github.com/iMovingTarget/log_analyzer) | planned |
 | 3 | v0.4.0 | Periodic ARP scan, device inventory, alert on unknown devices | planned |
 | 4 | v0.5.0 | Telegram alerts with deduplication and cooldowns | planned |
@@ -200,6 +200,10 @@ Design decisions and their trade-offs:
   blocked.
 - **Blocking is by exact name and for A and AAAA only.** Subdomains not on the list are allowed,
   and other record types for a blocked name (for example HTTPS records) are still forwarded.
+- **DNS blocking can't remove ads served from the same domains as content.** In a test with an
+  iPhone, about 6% of lookups were blocked (Google and Apple ad and analytics domains), while
+  Instagram's ads, which come from the same servers as its photos, were untouched. That is true
+  of any DNS blocker, not just this one.
 - **Privacy.** The database records which device looked up which name for 30 days. It is readable
   only by root and the `netwatch` user.
 - **IPv4 listen address only** is configured; clients reaching the host over IPv6 aren't served.

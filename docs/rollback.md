@@ -55,3 +55,17 @@ The router's DHCP settings still hand out the router as the DNS server. Pointing
 is out of scope while Netwatch runs on a desktop PC that isn't always on. If that changes, the
 rollback is to restore the router's DNS setting first; devices pick it up when their DHCP lease
 renews (reconnecting to Wi-Fi forces it).
+
+## Tested
+
+2026-10-28, Netwatch on the Hyper-V VM (Ubuntu Server 26.04.1, dnsmasq 2.92):
+
+- An iPhone was pointed at Netwatch (Configure DNS > Manual). About 200 lookups in two minutes
+  were stored, and Google and Apple ad and analytics domains were blocked.
+- Step 1 was carried out: Configure DNS > Automatic. The phone's last lookup through Netwatch was
+  its connectivity check (`captive.g.aaplimg.com`) at the moment of the change; none arrived
+  afterwards, and the phone kept working.
+- The VM had restarted earlier that afternoon; dnsmasq, `netwatch-dns` and the blocklist timer
+  all came back on their own, with no failed units.
+- Steps 2 to 4 are exercised on every pull request by CI's deploy job (stop and restart of the
+  logger, reinstall, uninstall `--purge` on a real systemd host).

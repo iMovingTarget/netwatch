@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 - DNS logging and blocking (Phase 1). `install.sh` sets up dnsmasq on the address in
   `NETWATCH_DNS_LISTEN`, forwarding to `NETWATCH_DNS_UPSTREAMS` (default 1.1.1.1 and 9.9.9.9),
@@ -48,5 +50,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - CI: ruff, pytest on Python 3.12 to 3.14 (Linux) and 3.14 (Windows), shellcheck, a unit
   hardening threshold, and an install, run and uninstall on a real systemd host.
 
-[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/iMovingTarget/netwatch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iMovingTarget/netwatch/releases/tag/v0.1.0
