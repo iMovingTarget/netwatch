@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-29
+
 ### Added
 - LAN device discovery (Phase 3). `netwatch-discovery.service`, started every five minutes by
   `netwatch-discovery.timer`, sends an ARP request to every address in the IPv4 subnet of
@@ -95,7 +97,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - CI: ruff, pytest on Python 3.12 to 3.14 (Linux) and 3.14 (Windows), shellcheck, a unit
   hardening threshold, and an install, run and uninstall on a real systemd host.
 
-[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/iMovingTarget/netwatch/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iMovingTarget/netwatch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iMovingTarget/netwatch/releases/tag/v0.1.0
