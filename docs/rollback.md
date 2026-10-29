@@ -108,3 +108,13 @@ renews (reconnecting to Wi-Fi forces it).
   v0.2.0. `netwatch-dns` failed as described and dnsmasq kept answering; with the database set
   aside v0.2.0 ran on an empty one; going forward again and moving the database back restored
   every stored query, login and alert, with no failed units.
+
+2026-10-29, the Phase 3 release candidate (schema 4) on the same VM:
+
+- Step 3 across the upgrade to schema 4: `install.sh v0.3.0` removed `netwatch-discovery` and its
+  timer, skipped the scan, and stopped with "netwatch-auth.service did not start" and the command
+  to go forward; both loggers logged the schema error while dnsmasq kept answering.
+- With the database set aside, v0.3.0 ran on an empty one with no failed units.
+- Going forward with the commands above restored the database (DNS queries, logins, alerts,
+  devices and address history); the logger caught up on the queries made in between from the
+  journal, and the next scan reported "2 devices, 0 new", so the baseline wasn't recorded again.
