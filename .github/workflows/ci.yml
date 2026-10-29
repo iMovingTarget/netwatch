@@ -51,14 +51,14 @@ jobs:
         run: netwatch --version
 
   deploy:
-    name: deploy (install, DNS and SSH end to end, uninstall under systemd)
+    name: deploy (install, DNS, SSH and device discovery end to end, uninstall under systemd)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Lint shell scripts
-        run: shellcheck deploy/*.sh deploy/bin/netwatch
+        run: shellcheck deploy/*.sh deploy/bin/netwatch .github/fake-device.sh
       - name: Unit hardening stays at exposure 2.0 or lower
         run: systemd-analyze security --offline=yes --threshold=20 deploy/systemd/*.service
       - name: Prepare the runner
@@ -73,9 +73,14 @@ jobs:
           git branch ci-under-test "$GITHUB_SHA"
           # A documentation address for dnsmasq to answer on, as the VM answers on its LAN one.
           sudo ip addr add 192.0.2.53/32 dev lo
+          # A LAN to scan: a bridge with one device, in a network namespace, plugged in.
+          sudo ip link add nwbr0 type bridge
+          sudo ip addr add 198.51.100.1/24 dev nwbr0
+          sudo ip link set nwbr0 up
+          sudo .github/fake-device.sh dev1 198.51.100.23 00:00:5e:00:53:23
           sudo install -d -m 0750 /etc/netwatch
-          printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 |
-            sudo tee /etc/netwatch/netwatch.env
+          printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 \
+            NETWATCH_DISCOVERY_INTERFACE=nwbr0 | sudo tee /etc/netwatch/netwatch.env
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
       - name: The CLI from a shell reports the deployed revision
@@ -87,7 +92,7 @@ jobs:
             sudo systemd-analyze verify "/etc/systemd/system/$(basename "$unit")"
           done
           systemctl is-active netwatch-dns.service netwatch-auth.service dnsmasq.service \
-            netwatch-blocklist.timer
+            netwatch-blocklist.timer netwatch-discovery.timer
           sudo ss -lnup | grep ':53 '
           if sudo ss -lnup | grep ':53 ' | grep dnsmasq | grep -v '192.0.2.53:53'; then
             echo "dnsmasq listens on more than the configured address"; exit 1
@@ -128,6 +133,28 @@ jobs:
           test "$(grep -c '^[0-9-]* [0-9:]*  127\.0\.0\.1 ' failed.txt)" -eq 6
           netwatch alerts | tee alerts.txt
           test "$(grep -c 'ssh-brute-force .*from 127\.0\.0\.1' alerts.txt)" -eq 1
+      - name: The first scan is the baseline; a device that appears later alerts once
+        run: |
+          set -x
+          netwatch devices | tee devices.txt
+          grep -E '^198\.51\.100\.23 +00:00:5e:00:53:23 .* known ' devices.txt
+          if netwatch alerts | grep new-device; then echo "the baseline raised an alert"; exit 1; fi
+          # A phone with a private (locally administered) Wi-Fi address joins.
+          sudo .github/fake-device.sh dev2 198.51.100.99 02:00:5e:00:53:63
+          sudo systemctl start netwatch-discovery.service
+          sudo systemctl start netwatch-discovery.service
+          netwatch alerts | tee alerts.txt
+          test "$(grep -c 'new-device .*02:00:5e:00:53:63 at 198\.51\.100\.99 (locally administered' alerts.txt)" -eq 1
+          netwatch devices --unknown | tee unknown.txt
+          grep -E '^198\.51\.100\.99 +02:00:5e:00:53:63 .* new ' unknown.txt
+          netwatch devices label 02:00:5e:00:53:63 'test phone'
+          test "$(netwatch devices --unknown)" = "no unknown devices"
+          journalctl -u netwatch-discovery.service --no-pager -o cat | tail -n 8
+      - name: Scanning needs the service's capability, and says so
+        run: |
+          if netwatch devices scan 2> scan-error.txt; then echo "scanned without CAP_NET_RAW"; exit 1; fi
+          cat scan-error.txt
+          grep -F "needs the CAP_NET_RAW capability" scan-error.txt
       - name: Re-installing the same commit reuses the build
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test | grep "reusing"
       - name: Uninstall --purge leaves nothing behind
