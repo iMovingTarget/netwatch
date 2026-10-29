@@ -18,12 +18,12 @@ from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
-from netwatch import authdb, journal, storage
+from netwatch import alerts, authdb, journal, storage
+from netwatch.alerts import Alert
 from netwatch.authlog import (
     ALERT_KINDS,
     KIND_BRUTE_FORCE,
     KIND_LOGIN_AFTER_FAILURES,
-    Alert,
     AuthEvent,
     AuthMonitor,
 )
@@ -48,8 +48,8 @@ def new_monitor(conn: sqlite3.Connection, settings: Settings, now_us: int) -> Au
     since_us = now_us - settings.auth_window_minutes * 60_000_000
     monitor.restore(
         failures=authdb.failures_since(conn, since_us),
-        alerts=authdb.alert_subjects_since(conn, KIND_BRUTE_FORCE, since_us),
-        login_alerts=authdb.alert_subjects_since(conn, KIND_LOGIN_AFTER_FAILURES, since_us),
+        alerts=alerts.subjects_since(conn, KIND_BRUTE_FORCE, since_us),
+        login_alerts=alerts.subjects_since(conn, KIND_LOGIN_AFTER_FAILURES, since_us),
     )
     return monitor
 
@@ -77,10 +77,10 @@ class AuthIngester:
         record = journal.parse_record(line)
         if record is None:
             return
-        event, alerts = self._monitor.feed(record)
+        event, raised = self._monitor.feed(record)
         if event is not None:
             self._events.append(event)
-        self._alerts += alerts
+        self._alerts += raised
         self._last_cursor = record.cursor
 
     def idle(self) -> None:
@@ -93,7 +93,7 @@ class AuthIngester:
             return 0
         with storage.transaction(self._conn):
             added = authdb.store_events(self._conn, self._events)
-            authdb.store_alerts(self._conn, self._alerts)
+            alerts.store(self._conn, self._alerts)
             if cursor is not None:
                 storage.put_meta(self._conn, CURSOR_KEY, cursor)
         for alert in self._alerts:
@@ -105,7 +105,8 @@ class AuthIngester:
     def prune(self) -> int:
         cutoff = self._wall_us() - self._retention_days * 86_400 * 1_000_000
         with storage.transaction(self._conn):
-            pruned = authdb.prune(self._conn, cutoff, ALERT_KINDS)
+            pruned = authdb.prune(self._conn, cutoff)
+            pruned += alerts.prune(self._conn, cutoff, ALERT_KINDS)
         if pruned:
             log.info(
                 "deleted %d login events and alerts older than %d days",
@@ -129,7 +130,7 @@ def import_file(settings: Settings, path: Path) -> tuple[int, int]:
     with closing(storage.connect(settings.state_dir / DB_NAME)) as conn:
         monitor = AuthMonitor(settings.auth_max_failures, settings.auth_window_minutes)
         events: list[AuthEvent] = []
-        alerts: list[Alert] = []
+        found: list[Alert] = []
         for line in lines:
             record = journal.parse_record(line)
             if record is None:
@@ -137,15 +138,15 @@ def import_file(settings: Settings, path: Path) -> tuple[int, int]:
             event, raised = monitor.feed(record)
             if event is not None:
                 events.append(event)
-            alerts += raised
+            found += raised
         with storage.transaction(conn):
             added = authdb.store_events(conn, events)
             # Alerts don't record which line raised them, so store them only when every event
             # is new: importing a file twice, or one that overlaps, must not repeat its alerts.
-            raised = authdb.store_alerts(conn, alerts) if added == len(events) else 0
-        if alerts and not raised:
+            stored = alerts.store(conn, found) if added == len(events) else 0
+        if found and not stored:
             log.warning("some events were already stored, so the file's alerts were not stored")
-        return added, raised
+        return added, stored
 
 
 def run(

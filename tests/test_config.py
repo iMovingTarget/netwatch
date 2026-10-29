@@ -145,3 +145,29 @@ def test_unreadable_env_file_is_a_config_error(tmp_path: Path) -> None:
     env_file.chmod(0)
     with pytest.raises(ConfigError, match="cannot read"):
         read_env_file(str(env_file))
+
+
+def test_discovery_is_off_by_default() -> None:
+    settings = load_settings({})
+    assert settings.discovery_interface is None
+    assert settings.discovery_retention_days == 90
+    assert settings.oui_dir == Path("/usr/share/ieee-data")
+
+
+def test_discovery_settings() -> None:
+    settings = load_settings(
+        {
+            "NETWATCH_DISCOVERY_INTERFACE": " eth0 ",
+            "NETWATCH_DISCOVERY_RETENTION_DAYS": "30",
+            "NETWATCH_OUI_DIR": "tests/fixtures/ieee-data",
+        }
+    )
+    assert settings.discovery_interface == "eth0"
+    assert settings.discovery_retention_days == 30
+    assert settings.oui_dir == Path("tests/fixtures/ieee-data")
+
+
+@pytest.mark.parametrize("name", ["eth0 eth1", "../eth0", "eth0;reboot", "averyveryverylongname"])
+def test_discovery_interface_must_be_an_interface_name(name: str) -> None:
+    with pytest.raises(ConfigError, match="NETWATCH_DISCOVERY_INTERFACE"):
+        load_settings({"NETWATCH_DISCOVERY_INTERFACE": name})

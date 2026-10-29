@@ -15,9 +15,12 @@ from types import FrameType
 
 from netwatch import (
     __version__,
+    alerts,
     authdb,
     authwatch,
     blocklist,
+    devicedb,
+    discovery,
     dnsdb,
     dnsmasq,
     dnsprobe,
@@ -26,6 +29,7 @@ from netwatch import (
     report,
     storage,
 )
+from netwatch.arp import normalize_mac
 from netwatch.config import environ_with_env_file, load_settings, read_revision
 from netwatch.errors import ConfigError, NetwatchError
 
@@ -112,6 +116,39 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     auth_recent_cmd.add_argument("--source", help="only logins from this address")
     auth_recent_cmd.add_argument("--failed", action="store_true", help="only failed logins")
     auth_recent_cmd.set_defaults(handler=_auth_recent)
+
+    devices_cmd = commands.add_parser(
+        "devices",
+        help="LAN device inventory from ARP scans",
+        description="List every device the ARP scans have seen, by address, with its vendor and"
+        " name. Without a command, lists; see the commands below for scanning and naming.",
+    )
+    devices_cmd.add_argument(
+        "--unknown", action="store_true", help="only devices that appeared after the baseline"
+    )
+    devices_cmd.set_defaults(handler=_devices_list)
+    devices_sub = devices_cmd.add_subparsers(dest="devices_command", metavar="<devices command>")
+    scan_cmd = devices_sub.add_parser(
+        "scan",
+        help="scan the LAN once and record who answers (the netwatch-discovery service)",
+        description="Send an ARP request to every address in the subnet of"
+        " NETWATCH_DISCOVERY_INTERFACE and record who answers. Needs CAP_NET_RAW, which the"
+        " netwatch-discovery service has: sudo systemctl start netwatch-discovery.service",
+    )
+    scan_cmd.add_argument(
+        "--from-file",
+        metavar="FILE",
+        help="record scans saved as JSON lines instead of scanning (see examples/)",
+    )
+    scan_cmd.set_defaults(handler=_devices_scan)
+    label_cmd = devices_sub.add_parser(
+        "label",
+        help="name a device and mark it known",
+        description="Give a device a name, which also marks it as known.",
+    )
+    label_cmd.add_argument("mac", help="the device's MAC address, e.g. 00:00:5e:00:53:2a")
+    label_cmd.add_argument("name", help="a name, e.g. 'living room TV'")
+    label_cmd.set_defaults(handler=_devices_label)
 
     alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
     alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
@@ -235,8 +272,50 @@ def _auth_recent(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
 
 def _alerts(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     with _open_db(environ) as conn:
-        alerts = authdb.alerts(conn, args.n)
-    print(report.alerts_table(alerts), end="")
+        stored = alerts.recent(conn, args.n)
+    print(report.alerts_table(stored), end="")
+    return 0
+
+
+def _devices_list(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    with _open_db(environ) as conn:
+        found = devicedb.devices(conn, unknown_only=args.unknown)
+        last_scan = storage.get_meta(conn, discovery.LAST_SCAN_KEY)
+    if args.unknown and not found:
+        print("no unknown devices")
+        return 0
+    last_scan_us = None if last_scan is None else int(last_scan)
+    print(report.devices_table(found, last_scan_us, count_present=not args.unknown), end="")
+    return 0
+
+
+def _devices_scan(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    if args.from_file:
+        results = discovery.import_file(settings, Path(args.from_file))
+        raised = sum(len(r.alerts) for r in results)
+        print(f"recorded {len(results)} scans from {args.from_file}, {raised} new-device alerts")
+        return 0
+    discovery.run(settings)
+    return 0
+
+
+LABEL_MAX = 64
+
+
+def _devices_label(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    try:
+        mac = normalize_mac(args.mac)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+    name = args.name.strip()
+    if not name or len(name) > LABEL_MAX or not name.isprintable():
+        raise ConfigError(f"a device name must be 1 to {LABEL_MAX} printable characters")
+    with _open_db(environ) as conn, storage.transaction(conn):
+        if not devicedb.set_label(conn, mac, name):
+            raise NetwatchError(f"no device with MAC address {mac} (see: netwatch devices)")
+    print(f"{mac} is now known as {name!r}")
     return 0
 
 

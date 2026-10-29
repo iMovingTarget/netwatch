@@ -25,3 +25,7 @@ class StorageError(NetwatchError):
 
 class BlocklistError(NetwatchError):
     """A blocklist couldn't be downloaded, or the result failed a sanity check."""
+
+
+class ScanError(NetwatchError):
+    """The LAN can't be scanned: no such interface, no IPv4 address, or no permission."""

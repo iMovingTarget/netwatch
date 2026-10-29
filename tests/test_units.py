@@ -37,9 +37,33 @@ def test_journal_readers_are_in_the_journal_group_and_offline(unit: str) -> None
     assert settings["User"] == ["netwatch"]
 
 
-def test_every_service_runs_as_netwatch_without_capabilities() -> None:
-    for unit in UNITS.glob("netwatch-*.service"):
+# The only capability any service gets.
+CAPABILITIES = {"netwatch-discovery.service": "CAP_NET_RAW"}
+
+
+def test_every_service_runs_as_netwatch_with_only_the_capability_it_needs() -> None:
+    units = sorted(UNITS.glob("netwatch-*.service"))
+    assert len(units) == 4
+    for unit in units:
         settings = _settings(unit.name)
+        expected = CAPABILITIES.get(unit.name, "")
         assert settings["User"] == ["netwatch"], unit.name
-        assert settings["CapabilityBoundingSet"] == [""], unit.name
+        assert settings["CapabilityBoundingSet"] == [expected], unit.name
+        assert settings["AmbientCapabilities"] == [expected], unit.name
         assert settings["NoNewPrivileges"] == ["yes"], unit.name
+
+
+def test_scanner_reaches_the_lan_with_raw_frames_only() -> None:
+    settings = _settings("netwatch-discovery.service")
+    # PrivateNetwork would hide the LAN interface; PrivateUsers would void CAP_NET_RAW on it.
+    assert "PrivateNetwork" not in settings
+    assert "PrivateUsers" not in settings
+    assert settings["RestrictAddressFamilies"] == ["AF_PACKET AF_INET AF_UNIX"]
+    assert settings["IPAddressDeny"] == ["any"]
+    assert "IPAddressAllow" not in settings
+
+
+def test_scan_timer_runs_every_five_minutes() -> None:
+    settings = _settings("netwatch-discovery.timer")
+    assert settings["OnCalendar"] == ["*:0/5"]
+    assert settings["WantedBy"] == ["timers.target"]

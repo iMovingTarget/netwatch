@@ -18,7 +18,9 @@
 # When NETWATCH_DNS_LISTEN is set in netwatch.env, it also sets up DNS: it installs dnsmasq if
 # needed, writes /etc/dnsmasq.d/netwatch.conf and a dnsmasq drop-in, downloads the first
 # blocklist, opens port 53 in ufw for NETWATCH_DNS_ALLOW_FROM only, and checks the result with
-# `netwatch dns check`. uninstall.sh reverses all of it.
+# `netwatch dns check`. When NETWATCH_DISCOVERY_INTERFACE is set, it installs the IEEE MAC address
+# registry (ieee-data) if needed, enables the five-minute ARP scan and runs the first scan, which
+# records the devices on the LAN as the baseline. uninstall.sh reverses all of it.
 
 set -euo pipefail
 
@@ -223,10 +225,30 @@ else
     fi
 fi
 
-# 7. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
+# 7. LAN device discovery: an ARP scan every five minutes, only if an interface is configured
+# and the release being installed has it (installing a release from before v0.4.0 is a rollback).
+discovery_interface=$(setting NETWATCH_DISCOVERY_INTERFACE)
+if [ ! -e "$UNIT_DIR/netwatch-discovery.service" ]; then
+    [ -z "$discovery_interface" ] || log "this release has no device discovery: skipping it"
+    discovery_interface=""
+elif [ -z "$discovery_interface" ]; then
+    log "NETWATCH_DISCOVERY_INTERFACE is not set in $CONF_DIR/netwatch.env: device discovery is off"
+    systemctl disable --now --quiet netwatch-discovery.timer 2>/dev/null || true
+elif ! dpkg-query -W -f '${Status}' ieee-data 2>/dev/null | grep -q 'ok installed'; then
+    log "installing ieee-data (the IEEE MAC address registry, for device vendors)"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y -q ieee-data >/dev/null ||
+        { apt-get update -q >/dev/null && apt-get install -y -q ieee-data >/dev/null; } ||
+        warn "could not install ieee-data: devices are recorded without a vendor"
+fi
+
+# 8. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
 started=()
 for name in "${shipped[@]}"; do
     grep -q '^\[Install\]' "$UNIT_DIR/$name" || continue
+    if [ "$name" = netwatch-discovery.timer ] && [ -z "$discovery_interface" ]; then
+        continue
+    fi
     systemctl enable --quiet "$name"
     systemctl restart "$name"
     started+=("$name")
@@ -248,7 +270,21 @@ if [ -n "$dns_listen" ]; then
         warn "the DNS check failed: see the lines above and journalctl -u dnsmasq"
 fi
 
-# 8. Keep the newest few releases, never the active one.
+# The first scan now rather than within five minutes: it records the baseline, and a wrong
+# interface name shows up here instead of in a timer failing quietly.
+if [ -n "$discovery_interface" ]; then
+    log "scanning the LAN on $discovery_interface"
+    if ! systemctl start netwatch-discovery.service; then
+        journalctl -u netwatch-discovery.service -n 5 --no-pager -o cat >&2 || true
+        die "the device scan failed (see above; journalctl -u netwatch-discovery)"
+    fi
+    # As the netwatch user, like /usr/local/bin/netwatch, so nothing in the state directory
+    # becomes root's. The first line is "last scan <time>: N of N devices answered".
+    inventory=$(runuser -u "$SERVICE_USER" -- "$release/venv/bin/netwatch" devices) || true
+    log "${inventory%%$'\n'*}"
+fi
+
+# 9. Keep the newest few releases, never the active one.
 find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
     sort -rn | awk -v keep="$KEEP_RELEASES" 'NR > keep { print $2 }' |
     while read -r old; do

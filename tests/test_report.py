@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from netwatch import authdb, dnsdb, ingest, report, storage
+from netwatch import alerts, authdb, dnsdb, ingest, report, storage
 from netwatch.__main__ import main
-from netwatch.authlog import Alert, AuthEvent
+from netwatch.alerts import Alert
+from netwatch.authlog import AuthEvent
 from netwatch.dnslog import DnsQuery
 
 T0 = 1_793_188_800_000_000  # 2026-10-28 12:00:00 UTC in microseconds
@@ -103,7 +104,7 @@ def test_auth_recent_and_alerts_commands(
 
     with closing(storage.connect(tmp_path / ingest.DB_NAME)) as conn, storage.transaction(conn):
         authdb.store_events(conn, _auth_events())
-        authdb.store_alerts(
+        alerts.store(
             conn, [Alert(T0 + 3, "ssh-brute-force", "warning", "203.0.113.5", "5 or more ...")]
         )
 

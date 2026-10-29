@@ -1,26 +1,13 @@
-"""Store and query SSH login events and alerts in the Netwatch database."""
+"""Store and query SSH login events in the Netwatch database (alerts are in netwatch.alerts)."""
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable
 
-from netwatch.authlog import OUTCOME_FAILED, Alert, AuthEvent
+from netwatch.authlog import OUTCOME_FAILED, AuthEvent
 
 _EVENT_COLUMNS = "ts_us, source, username, outcome, method, invalid_user, message, cursor"
-_ALERT_COLUMNS = "ts_us, kind, severity, subject, message"
-
-
-@dataclass(frozen=True)
-class StoredAlert:
-    id: int
-    ts_us: int
-    kind: str
-    severity: str
-    subject: str
-    message: str
-    notified_us: int | None
 
 
 def store_events(conn: sqlite3.Connection, events: Iterable[AuthEvent]) -> int:
@@ -44,15 +31,6 @@ def store_events(conn: sqlite3.Connection, events: Iterable[AuthEvent]) -> int:
             )
             for e in events
         ),
-    )
-    return conn.total_changes - before
-
-
-def store_alerts(conn: sqlite3.Connection, alerts: Iterable[Alert]) -> int:
-    before = conn.total_changes
-    conn.executemany(
-        f"INSERT INTO alerts ({_ALERT_COLUMNS}) VALUES (?, ?, ?, ?, ?)",
-        ((a.ts_us, a.kind, a.severity, a.subject, a.message) for a in alerts),
     )
     return conn.total_changes - before
 
@@ -91,38 +69,6 @@ def failures_since(conn: sqlite3.Connection, since_us: int) -> list[tuple[str, i
     return rows.fetchall()
 
 
-def alert_subjects_since(
-    conn: sqlite3.Connection, kind: str, since_us: int
-) -> list[tuple[str, int]]:
-    """(subject, time) of alerts of ``kind`` since ``since_us``, oldest first."""
-    rows = conn.execute(
-        "SELECT subject, ts_us FROM alerts WHERE kind = ? AND ts_us >= ? ORDER BY ts_us, id",
-        (kind, since_us),
-    )
-    return rows.fetchall()
-
-
-def alerts(
-    conn: sqlite3.Connection, limit: int, kinds: Sequence[str] | None = None
-) -> list[StoredAlert]:
-    """The newest alerts first, optionally only of some kinds."""
-    where, params = "", ()
-    if kinds:
-        where = f"WHERE kind IN ({', '.join('?' * len(kinds))})"
-        params = tuple(kinds)
-    rows = conn.execute(
-        f"SELECT id, {_ALERT_COLUMNS}, notified_us FROM alerts {where}"
-        " ORDER BY ts_us DESC, id DESC LIMIT ?",
-        (*params, limit),
-    )
-    return [StoredAlert(*row) for row in rows]
-
-
-def prune(conn: sqlite3.Connection, older_than_us: int, alert_kinds: Sequence[str]) -> int:
-    """Delete login events, and alerts of ``alert_kinds``, from before ``older_than_us``."""
-    deleted = conn.execute("DELETE FROM auth_events WHERE ts_us < ?", (older_than_us,)).rowcount
-    deleted += conn.execute(
-        f"DELETE FROM alerts WHERE ts_us < ? AND kind IN ({', '.join('?' * len(alert_kinds))})",
-        (older_than_us, *alert_kinds),
-    ).rowcount
-    return deleted
+def prune(conn: sqlite3.Connection, older_than_us: int) -> int:
+    """Delete login events from before ``older_than_us``. Returns how many were deleted."""
+    return conn.execute("DELETE FROM auth_events WHERE ts_us < ?", (older_than_us,)).rowcount

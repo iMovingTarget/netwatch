@@ -7,8 +7,9 @@ from collections.abc import Sequence
 from datetime import datetime, tzinfo
 
 from netwatch import dnsdb
-from netwatch.authdb import StoredAlert
+from netwatch.alerts import StoredAlert
 from netwatch.authlog import AuthEvent
+from netwatch.devicedb import Device
 from netwatch.dnslog import DnsQuery
 
 _STATUS_ORDER = ("forwarded", "cached", "blocked", "local", "no-answer")
@@ -59,6 +60,49 @@ def alerts_table(alerts: list[StoredAlert], tz: tzinfo | None = None) -> str:
     for a in reversed(alerts):
         rows.append((_time(a.ts_us, tz), a.severity, a.kind, _escaped(a.message)))
     return _columns(rows)
+
+
+def devices_table(
+    devices: list[Device],
+    last_scan_us: int | None,
+    tz: tzinfo | None = None,
+    count_present: bool = True,
+) -> str:
+    """The device inventory, by address. Labels and vendor names are escaped.
+
+    With ``count_present``, the first line says how many of the devices answered the last scan;
+    leave it off when ``devices`` is only part of the inventory.
+    """
+    if not devices:
+        return "no devices recorded yet\n"
+    lines = []
+    if last_scan_us is not None:
+        header = f"last scan {_time(last_scan_us, tz)}"
+        if count_present:
+            present = sum(d.last_seen_us >= last_scan_us for d in devices)
+            header += f": {present} of {len(devices)} devices answered"
+        lines.append(header)
+    rows = [("IP", "MAC", "FIRST SEEN", "LAST SEEN", "STATUS", "NAME")]
+    for d in devices:
+        name = f"{d.label} [{_vendor(d)}]" if d.label else f"[{_vendor(d)}]"
+        status = "known" if d.known else "new"
+        rows.append(
+            (
+                d.last_ip,
+                d.mac,
+                _time(d.first_seen_us, tz),
+                _time(d.last_seen_us, tz),
+                status,
+                _escaped(name),
+            )
+        )
+    return "\n".join(lines) + ("\n" if lines else "") + _columns(rows)
+
+
+def _vendor(device: Device) -> str:
+    if device.local_admin:
+        return "locally administered"  # a private Wi-Fi address, so no vendor
+    return device.vendor or "vendor unknown"
 
 
 def summary(conn: sqlite3.Connection, since_us: int, hours: int, limit: int) -> str:

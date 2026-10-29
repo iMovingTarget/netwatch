@@ -35,3 +35,11 @@ the workstation is 192.0.2.10, the account name is `alice`, and the key fingerpr
 boot, machine and sequence IDs inside the cursors are made up. Only the fields Netwatch reads
 are kept (`MESSAGE`, `__CURSOR`, `__REALTIME_TIMESTAMP`, `SYSLOG_IDENTIFIER`, `_PID`,
 `PRIORITY`); the timestamps and message text are otherwise as logged. `examples/` has a copy.
+
+## ieee-data/
+
+Files in the format of the IEEE MAC address registry as the `ieee-data` package installs it in
+`/usr/share/ieee-data/` (UTF-8, CRLF line endings; `.gitattributes` keeps them byte for byte):
+`oui.txt` (24-bit MA-L blocks), `mam.txt` (28-bit MA-M) and `oui36.txt` (36-bit MA-S). The IANA
+and IEEE Registration Authority entries are real; the other organisations, the addresses and two
+deliberately malformed entries are made up to test longest-prefix matching and the parser.
