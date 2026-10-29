@@ -1,0 +1,10 @@
+[Unit]
+Description=Netwatch LAN device scan every five minutes
+Documentation=https://github.com/iMovingTarget/netwatch
+
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
