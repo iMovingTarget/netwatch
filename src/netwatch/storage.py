@@ -71,6 +71,35 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX alerts_ts ON alerts (ts_us)",
         "CREATE INDEX alerts_kind_ts ON alerts (kind, ts_us)",
     ),
+    4: (
+        # One row per MAC address ever seen on the LAN by the ARP scan. Rows are kept forever:
+        # deleting one would make a returning device look new. known is 1 for devices in the
+        # first (baseline) scan and devices the user labelled; a device first seen later is
+        # unknown until labelled. local_admin marks a locally administered address (such as a
+        # phone's private Wi-Fi address), which has no vendor.
+        """CREATE TABLE devices (
+            mac TEXT PRIMARY KEY,
+            vendor TEXT,
+            local_admin INTEGER NOT NULL,
+            label TEXT,
+            known INTEGER NOT NULL,
+            first_seen_us INTEGER NOT NULL,
+            last_seen_us INTEGER NOT NULL,
+            last_ip TEXT NOT NULL
+        )""",
+        # Which device held which address, and when: one row per stretch at one address,
+        # ended when another device takes the address, so a DNS query (stored by client
+        # address) can be traced to a device.
+        """CREATE TABLE device_addresses (
+            id INTEGER PRIMARY KEY,
+            mac TEXT NOT NULL REFERENCES devices (mac),
+            ip TEXT NOT NULL,
+            first_seen_us INTEGER NOT NULL,
+            last_seen_us INTEGER NOT NULL
+        )""",
+        "CREATE INDEX device_addresses_mac ON device_addresses (mac, last_seen_us)",
+        "CREATE INDEX device_addresses_ip ON device_addresses (ip, last_seen_us)",
+    ),
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 

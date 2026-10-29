@@ -64,3 +64,23 @@ def test_upgrade_from_an_older_schema_keeps_existing_rows(tmp_path: Path) -> Non
         assert storage.schema_version(conn) == storage.SCHEMA_VERSION
         assert conn.execute("SELECT count(*) FROM dns_queries").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM auth_events").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM devices").fetchone()[0] == 0
+
+
+def test_upgrade_from_v0_3_0_keeps_alerts(tmp_path: Path) -> None:
+    # v0.3.0 (schema 3) is what the VM runs before Phase 3.
+    db = tmp_path / "nw.db"
+    with closing(sqlite3.connect(db)) as raw:
+        for version in (1, 2, 3):
+            for statement in storage.MIGRATIONS[version]:
+                raw.execute(statement)
+        raw.execute(
+            "INSERT INTO alerts (ts_us, kind, severity, subject, message)"
+            " VALUES (1, 'ssh-brute-force', 'warning', '203.0.113.5', 'm')"
+        )
+        raw.execute("PRAGMA user_version = 3")
+        raw.commit()
+    with closing(storage.connect(db)) as conn:
+        assert storage.schema_version(conn) == 4
+        assert conn.execute("SELECT count(*) FROM alerts").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM device_addresses").fetchone()[0] == 0
