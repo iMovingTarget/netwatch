@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import datetime, tzinfo
 
 from netwatch import dnsdb
-from netwatch.authdb import StoredAlert
+from netwatch.alerts import StoredAlert
 from netwatch.authlog import AuthEvent
 from netwatch.dnslog import DnsQuery
 

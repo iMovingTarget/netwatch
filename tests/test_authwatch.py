@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from netwatch import authdb, authwatch, storage
+from netwatch import alerts, authdb, authwatch, storage
 from netwatch.__main__ import main
 from netwatch.authlog import KIND_BRUTE_FORCE, AuthMonitor
 from netwatch.config import load_settings
@@ -56,7 +56,7 @@ def test_real_log_gives_one_alert_and_every_login(conn: sqlite3.Connection) -> N
     assert {(e.source, e.username, e.method) for e in logins} == {
         ("192.0.2.10", "alice", "publickey")
     }
-    [alert] = authdb.alerts(conn, 10)
+    [alert] = alerts.recent(conn, 10)
     assert (alert.kind, alert.subject) == (KIND_BRUTE_FORCE, "203.0.113.5")
     assert "latest as 'nwtest5'" in alert.message  # raised by the fifth failure
     assert storage.get_meta(conn, authwatch.CURSOR_KEY) == json.loads(_lines()[-1])["__CURSOR"]
@@ -70,7 +70,7 @@ def test_restart_restores_the_window_from_the_database(conn: sqlite3.Connection)
     # the failures and the alert's cooldown.
     again = _ingest(conn, authwatch.new_monitor(conn, settings, now_us=_end_us()))
     assert again.commit() == 0
-    assert len(authdb.alerts(conn, 10)) == 1
+    assert len(alerts.recent(conn, 10)) == 1
 
 
 def test_nothing_to_commit_is_a_no_op(conn: sqlite3.Connection) -> None:
@@ -97,7 +97,7 @@ def test_import_file_command(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     assert main(["auth", "watch", "--from-file", str(FIXTURE)], environ=env) == 0
     assert capsys.readouterr().out.strip().startswith("stored 0 new login events")
     with closing(storage.connect(tmp_path / "state" / DB_NAME)) as conn:
-        assert len(authdb.alerts(conn, 10)) == 1  # importing again doesn't repeat alerts
+        assert len(alerts.recent(conn, 10)) == 1  # importing again doesn't repeat alerts
     missing = str(tmp_path / "missing.jsonl")
     assert main(["auth", "watch", "--from-file", missing], environ=env) == 1
 
@@ -137,4 +137,4 @@ def test_run_follows_sshd_and_resumes_after_the_saved_cursor(tmp_path: Path) -> 
         os.environ["PATH"] = os.environ["PATH"].split(os.pathsep, 1)[1]
     with closing(storage.connect(tmp_path / DB_NAME)) as conn:
         assert len(authdb.recent(conn, 100)) == 12
-        assert len(authdb.alerts(conn, 10)) == 1
+        assert len(alerts.recent(conn, 10)) == 1

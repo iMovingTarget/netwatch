@@ -15,6 +15,7 @@ from types import FrameType
 
 from netwatch import (
     __version__,
+    alerts,
     authdb,
     authwatch,
     blocklist,
@@ -235,8 +236,8 @@ def _auth_recent(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
 
 def _alerts(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     with _open_db(environ) as conn:
-        alerts = authdb.alerts(conn, args.n)
-    print(report.alerts_table(alerts), end="")
+        stored = alerts.recent(conn, args.n)
+    print(report.alerts_table(stored), end="")
     return 0
 
 

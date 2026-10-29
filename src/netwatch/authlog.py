@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from log_analyzer.core import RateTracker
 from log_analyzer.parsers import SSHParser
 
+from netwatch.alerts import SEVERITY_CRITICAL, SEVERITY_WARNING, Alert
 from netwatch.journal import Record
 
 OUTCOME_FAILED = "failed"
@@ -29,8 +30,6 @@ OUTCOME_ACCEPTED = "accepted"
 KIND_BRUTE_FORCE = "ssh-brute-force"
 KIND_LOGIN_AFTER_FAILURES = "ssh-login-after-failures"
 ALERT_KINDS = (KIND_BRUTE_FORCE, KIND_LOGIN_AFTER_FAILURES)
-SEVERITY_WARNING = "warning"
-SEVERITY_CRITICAL = "critical"
 
 
 @dataclass(frozen=True)
@@ -45,15 +44,6 @@ class AuthEvent:
     invalid_user: bool  # the account doesn't exist
     message: str
     cursor: str  # journal cursor of the entry; unique, so storing is idempotent
-
-
-@dataclass(frozen=True)
-class Alert:
-    ts_us: int
-    kind: str
-    severity: str
-    subject: str  # what the alert is about: here the client's address
-    message: str
 
 
 def _utc(ts_us: int) -> datetime:
