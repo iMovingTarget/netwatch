@@ -2,23 +2,27 @@
 
 A home-network security monitor that runs as a set of systemd services on a Linux host on the
 LAN. It is built in phases: DNS logging and blocking, live detection of failed SSH logins, a LAN
-device inventory with alerts for unknown devices, Telegram notifications, and a small read-only
-dashboard. Each phase ships as a tagged release.
+device inventory with alerts for unknown devices, metrics and dashboards in Prometheus and
+Grafana, and Telegram notifications. Each phase ships as a tagged release.
 
-**Status: v0.3.0 (Phase 2, live SSH login monitor).** Netwatch follows sshd's log, stores every
-failed and successful login, and raises an alert when one address keeps failing, and a critical
-one if that address then gets in. Since Phase 1, dnsmasq answers DNS for the devices pointed at
-the host and blocks ad, tracking and malware domains, and Netwatch stores every query.
+**Status: v0.4.0 (Phase 3, LAN device discovery).** Every five minutes Netwatch asks every
+address on the LAN which device has it (ARP), keeps an inventory of the devices that answer with
+their vendor from the IEEE registry, and raises an alert the first time a device it has never
+seen appears. Since Phase 2 it follows sshd's log and alerts on failed-login attacks, and since
+Phase 1 dnsmasq answers and blocks DNS for the devices pointed at the host, with every query
+stored.
 
-From a test on the VM: six failed logins from the admin PC as unknown users, then two normal key
-logins from the same PC (address and account name replaced with documentation ones). The second
-login raises nothing: it is the same incident.
+Quick start below shows the commands on example data; the device inventory looks like this:
 
 ```
-$ netwatch alerts
-TIME                 SEVERITY  KIND                      MESSAGE
-2026-10-28 17:15:01  warning   ssh-brute-force           5 or more failed SSH logins from 192.0.2.10 within 10 minutes (latest as 'nwdemo5')
-2026-10-28 17:15:05  critical  ssh-login-after-failures  successful SSH login as 'alice' from 192.0.2.10 after a brute-force alert for it within 10 minutes
+$ netwatch devices
+last scan 2026-10-29 17:15:04: 4 of 5 devices answered
+IP           MAC                FIRST SEEN           LAST SEEN            STATUS  NAME
+192.0.2.1    00:00:5e:00:53:01  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
+192.0.2.97   02:00:5e:00:53:61  2026-10-29 17:00:03  2026-10-29 17:10:03  known   [locally administered]
+192.0.2.99   00:00:5e:00:53:63  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
+192.0.2.100  00:00:5e:00:53:64  2026-10-29 17:15:04  2026-10-29 17:15:04  new     [ICANN, IANA Department]
+192.0.2.120  06:00:5e:00:53:78  2026-10-29 17:10:03  2026-10-29 17:15:04  new     [locally administered]
 ```
 
 ## What it does
@@ -28,9 +32,9 @@ TIME                 SEVERITY  KIND                      MESSAGE
 | 0 | v0.1.0 | Install script, hardened units, CI install test, storage and logging base | done |
 | 1 | v0.2.0 | DNS logger and sinkhole: dnsmasq answers, Netwatch logs every query and manages blocklists | done |
 | 2 | v0.3.0 | Live failed-login detection for sshd, reusing [log-analyzer](https://github.com/iMovingTarget/log-analyzer) | done |
-| 3 | v0.4.0 | Periodic ARP scan, device inventory, alert on unknown devices | planned |
-| 4 | v0.5.0 | Telegram alerts with deduplication and cooldowns | planned |
-| 5 | v0.6.0 | Read-only LAN-only dashboard behind a login | planned |
+| 3 | v0.4.0 | Periodic ARP scan, device inventory with vendors, alert on unknown devices | done |
+| 4 | v0.5.0 | Prometheus metrics and Grafana dashboards (on a separate monitoring VM), health alerts | planned |
+| 5 | v0.6.0 | Telegram alerts with deduplication and cooldowns | planned |
 
 For DNS that means:
 
@@ -50,8 +54,21 @@ For SSH logins on the host:
   configurable). One alert per address per window, however long the attack goes on.
 - **ssh-login-after-failures** (critical): a successful login from an address with a
   brute-force alert in the last window. One per brute-force alert.
-- Alerts go to a table that later phases share; Phase 4 sends them to Telegram. Until then they
+- Alerts go to a table every detector shares; Phase 5 sends them to Telegram. Until then they
   are in `netwatch alerts` and in the journal at warning priority.
+
+For the devices on the LAN (opt-in: set `NETWATCH_DISCOVERY_INTERFACE`, for example `eth0`):
+
+- **Every device that answers ARP is recorded**: MAC address, latest IPv4 address, vendor from
+  the IEEE registry (or "locally administered" for a phone's private Wi-Fi address), first and
+  last seen, and an optional label. The scan runs every five minutes and takes about four
+  seconds for a /24.
+- **The first scan is the baseline**: the devices on the network when discovery is switched on
+  are recorded as known, without alerts.
+- **new-device** (warning): a MAC address seen for the first time after the baseline. One alert
+  per address, ever; it stays "new" in `netwatch devices --unknown` until it is labelled.
+- **Address history**: which device held which address and when, kept for 90 days, so a DNS
+  client address can be traced to a device even after its lease changed.
 
 ## Quick start (development)
 
@@ -66,6 +83,35 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 export NETWATCH_STATE_DIR=var
 ```
+
+`examples/arp-scans.jsonl` holds four saved scans with documentation addresses, modelled on the
+VM test: a baseline of a router, a PC and a phone, then a visitor's phone (with a private Wi-Fi
+address) joins, then the phone switches its private address off and comes back with its real
+one. Point `NETWATCH_OUI_DIR` at the small registry in the test fixtures so vendors resolve on any
+OS (on Ubuntu the full one is in `/usr/share/ieee-data`, package `ieee-data`):
+
+```
+$ export NETWATCH_OUI_DIR=tests/fixtures/ieee-data
+$ netwatch devices scan --from-file examples/arp-scans.jsonl
+recorded 4 scans from examples/arp-scans.jsonl, 2 new-device alerts
+$ netwatch devices
+last scan 2026-10-29 17:15:04: 4 of 5 devices answered
+IP           MAC                FIRST SEEN           LAST SEEN            STATUS  NAME
+192.0.2.1    00:00:5e:00:53:01  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
+192.0.2.97   02:00:5e:00:53:61  2026-10-29 17:00:03  2026-10-29 17:10:03  known   [locally administered]
+192.0.2.99   00:00:5e:00:53:63  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
+192.0.2.100  00:00:5e:00:53:64  2026-10-29 17:15:04  2026-10-29 17:15:04  new     [ICANN, IANA Department]
+192.0.2.120  06:00:5e:00:53:78  2026-10-29 17:10:03  2026-10-29 17:15:04  new     [locally administered]
+$ netwatch alerts
+TIME                 SEVERITY  KIND        MESSAGE
+2026-10-29 17:10:03  warning   new-device  new device 06:00:5e:00:53:78 at 192.0.2.120 (locally administered address, so no vendor; phones use these as private Wi-Fi addresses)
+2026-10-29 17:15:04  warning   new-device  new device 00:00:5e:00:53:64 at 192.0.2.100 (ICANN, IANA Department)
+$ netwatch devices label 06:00:5e:00:53:78 "visitor's phone"
+06:00:5e:00:53:78 is now known as "visitor's phone"
+```
+
+The documentation MAC addresses (RFC 7042) all belong to IANA's block, hence the vendor. The
+times are UTC here; the CLI prints local time.
 
 `examples/sshd-journal.jsonl` is a real sshd log from the VM, anonymised: eight failed logins from
 one address in four seconds, between normal key logins.
@@ -124,24 +170,28 @@ commit:
 ```
 git clone https://github.com/iMovingTarget/netwatch.git && cd netwatch
 sudo deploy/check-host.sh > check.txt 2>&1   # optional: read-only report of the host
-sudo deploy/install.sh v0.3.0                # first install: creates /etc/netwatch/netwatch.env
-sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN and NETWATCH_DNS_ALLOW_FROM
-sudo deploy/install.sh v0.3.0                # again, now with DNS
+sudo deploy/install.sh v0.4.0                # first install: creates /etc/netwatch/netwatch.env
+sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN, NETWATCH_DNS_ALLOW_FROM
+                                             # and NETWATCH_DISCOVERY_INTERFACE
+sudo deploy/install.sh v0.4.0                # again, now with DNS and device discovery
 ```
 
-The second run, from CI's real install on a fresh Ubuntu runner (a documentation address stands in
-for the LAN address):
+The second run on the VM, upgrading from v0.3.0 (the LAN address replaced with a documentation
+one). The first scan records what is on the LAN as the baseline:
 
 ```
+install: keeping the existing /etc/netwatch/netwatch.env
 install: setting up dnsmasq on 192.0.2.53
-install: installing dnsmasq
-install: downloading the first blocklist
-192.0.2.53: example.com A -> NOERROR 172.66.147.243, 104.20.23.154 (10 ms)
+install: ufw: allowed DNS from 192.0.2.0/24 to 192.0.2.53
+192.0.2.53: example.com A -> NOERROR 172.66.147.243, 104.20.23.154 (57 ms)
 192.0.2.53: 0.0.0.0.creative.hpyrdr.com A -> NOERROR 0.0.0.0 (blocked)
-install: installed netwatch 0.3.0 (revision a9ec96d438a1) from ci-under-test
+install: scanning the LAN on eth0
+install: last scan 2026-10-29 17:30:36: 2 of 2 devices answered
+install: installed netwatch 0.4.0 (revision 10645910ba2d) from phase-3-discovery
 install:   netwatch-auth.service: active
 install:   netwatch-dns.service: active
 install:   netwatch-blocklist.timer: active
+install:   netwatch-discovery.timer: active
 ```
 
 Then point one device's DNS at the host's LAN address and watch it with `netwatch dns recent`.
@@ -155,11 +205,12 @@ to an older version or remove Netwatch. Installing an older ref is the version r
 | `/opt/netwatch/current` | Symlink to the active release |
 | `/etc/netwatch/netwatch.env` | Settings (and, later, secrets). `root:netwatch`, mode 0640 |
 | `/etc/netwatch/allowlist.txt` | Names never to block |
-| `/var/lib/netwatch/` | The SQLite database (DNS queries, SSH logins, alerts) |
+| `/var/lib/netwatch/` | The SQLite database (DNS queries, SSH logins, devices, alerts) |
 | `/var/lib/netwatch-blocklist/` | The blocklist dnsmasq reads (world-readable) |
 | `/etc/dnsmasq.d/netwatch.conf` | Generated by `netwatch dns config`; rewritten on every install |
 | `/etc/systemd/system/` | `netwatch-*` units and `dnsmasq.service.d/netwatch.conf` |
 | `/usr/local/bin/netwatch` | Runs the CLI as the `netwatch` user |
+| `/usr/share/ieee-data/` | The IEEE MAC address registry (package `ieee-data`), for vendors |
 
 Day-to-day commands (they run as the `netwatch` user through `/usr/local/bin/netwatch`):
 
@@ -170,7 +221,10 @@ netwatch dns check                     # forwarding works and a listed name is b
 netwatch blocklist status
 netwatch blocklist update [--force]    # after editing the allowlist
 netwatch auth recent [-n 20] [--source ADDRESS] [--failed]
+netwatch devices [--unknown]           # the inventory; --unknown: new since the baseline
+netwatch devices label MAC NAME        # name a device; it is then known
 netwatch alerts [-n 20]
+sudo systemctl start netwatch-discovery.service   # scan now instead of within five minutes
 journalctl -u 'netwatch*' -u dnsmasq
 ```
 
@@ -187,6 +241,10 @@ journalctl -u 'netwatch*' -u dnsmasq
  sshd / sshd-session --logs--> journal
  netwatch-auth: journalctl --follow -> log-analyzer SSHParser -> RateTracker per address
                 -> logins + alerts -> SQLite (+ resume cursor)
+
+ netwatch-discovery.timer (every 5 min) -> netwatch-discovery (CAP_NET_RAW only):
+     ARP request to every address in eth0's subnet -> replies -> vendor (IEEE registry)
+     -> devices + address history + new-device alerts -> SQLite
 ```
 
 | Module | Role |
@@ -199,7 +257,13 @@ journalctl -u 'netwatch*' -u dnsmasq
 | `netwatch/dnsdb.py` | Stores and queries DNS records; idempotent inserts, retention |
 | `netwatch/authlog.py` | SSH logins and alert rules on top of log-analyzer's parser and rate tracker |
 | `netwatch/authwatch.py` | The `netwatch-auth` service: stores logins and alerts with the cursor, restores its window on start |
-| `netwatch/authdb.py` | Stores and queries SSH logins and alerts |
+| `netwatch/authdb.py` | Stores and queries SSH logins |
+| `netwatch/alerts.py` | The alerts table every detector writes to |
+| `netwatch/arp.py` | Builds and parses ARP frames (RFC 826); MAC address helpers |
+| `netwatch/scanner.py` | The ARP sweep over a packet socket; reads the interface's address |
+| `netwatch/oui.py` | Vendor lookup in the IEEE registry, longest prefix first |
+| `netwatch/discovery.py` | The `netwatch-discovery` service: baseline, new-device alerts, retention |
+| `netwatch/devicedb.py` | Stores and queries devices and which address each held when |
 | `netwatch/blocklist.py` | Downloads, parses, checks and atomically installs the blocklist |
 | `netwatch/dnsmasq.py` | Generates dnsmasq's configuration |
 | `netwatch/dnsprobe.py` | Minimal DNS client for `netwatch dns check` |
@@ -243,9 +307,35 @@ Design decisions and their trade-offs:
 - **Detect, don't block.** Netwatch alerts but changes no firewall rules. Automatic bans can be
   turned against you (lock out the admin, or the router), and OpenSSH 9.8 and later already slow
   down addresses that keep failing (`PerSourcePenalties`).
+- **Ask every address instead of listening.** The kernel's neighbour table only knows devices the
+  host has talked to (on the VM: the router and the admin PC), and listening for broadcasts only
+  finds devices that choose to announce themselves. Every IPv4 device on the LAN has to answer
+  ARP for its own address, so a sweep finds them whether or not they want to be found. A second
+  pass asks the silent addresses again, because a phone in Wi-Fi power save often misses the
+  first request.
+- **A baseline, not an allowlist.** Alerting on every device on install day is noise, and an
+  allowlist file is upkeep nobody keeps up. Whatever is there when discovery is switched on is
+  known; anything after that alerts once and stays "new" until it is labelled. A scan that finds
+  nothing (not even the router) means the scan failed, so it never becomes the baseline.
+- **One alert per MAC address, ever.** A laptop that sleeps through a scan isn't new when it
+  comes back. A phone that switches to a different private Wi-Fi address is a new address, so it
+  alerts, and the message says it's locally administered, which is usually exactly that.
+- **Vendors from the IEEE registry, longest prefix first.** Ubuntu packages the registry
+  (`ieee-data`), so there's nothing to download or call. IEEE sells 28- and 36-bit blocks inside
+  its own 24-bit ones, so matching only the first 24 bits would name "IEEE Registration
+  Authority" for many small manufacturers.
+- **Raw frames with one capability.** The scan is about 150 lines of standard-library Python on
+  an `AF_PACKET` socket rather than a call to `arp-scan`, so it needs no extra package and only
+  `CAP_NET_RAW`. Its unit has no other capability, cannot open IP connections
+  (`IPAddressDeny=any`) and writes only the state directory.
+- **Address history, not just the latest address.** DNS queries are stored by client address, and
+  addresses move. Each device keeps one row per stretch at an address, ended only when another
+  device is seen there, so "which device was 192.0.2.50 at 14:00" has an answer and a range
+  extender answering for two addresses doesn't add a row per scan.
 - **One package, one systemd unit per component.** Each service gets only what it needs: the
   loggers read the journal (`systemd-journal` group) with no network; the updater has the network
-  but nothing else. `systemd-analyze security` rates them 0.6, 0.6 and 1.1; CI fails above 2.0.
+  but nothing else; the scanner sends ARP frames and nothing else. `systemd-analyze security`
+  rates them 0.6, 0.6, 1.1 and 1.4; CI fails above 2.0.
 - **Atomic, commit-pinned deploys.** Every install builds a virtualenv for one commit and only
   then switches the `current` symlink with `rename(2)`; installing an older ref is the rollback.
 - **SQLite in WAL mode.** One host and a low write rate don't justify a database server. WAL lets
@@ -270,9 +360,23 @@ Design decisions and their trade-offs:
 - **Attempts are counted from sshd's log.** A client that opens connections without sending a
   username leaves no "failed login" to count. Connections are told apart by address and port.
   Under a very large flood, journald's rate limit for sshd can drop lines.
-- **Alerts aren't sent anywhere yet**; Telegram comes in Phase 4.
-- **Privacy.** The database records which device looked up which name for 30 days, and SSH logins
-  for 90. It is readable only by root and the `netwatch` user.
+- **Device discovery sees IPv4 devices on one subnet only**, at most a /22. Devices on another
+  VLAN, behind another router, or on a guest Wi-Fi with client isolation are invisible, and an
+  IPv6-only device isn't seen.
+- **A device that's asleep may not answer.** A locked phone in Wi-Fi power save can miss both
+  passes, so it can be missing from the baseline (the owner's phone was, on the VM) and then
+  alert when it wakes, or look absent for a while. A device that joins and leaves between two scans, five minutes apart,
+  is never seen.
+- **Private Wi-Fi addresses that rotate look like new devices.** iOS and Android can change a
+  phone's address per network or over time; each new one is a new device and one alert.
+- **A Wi-Fi range extender may answer for its clients** with its own MAC address, so devices
+  behind it share one entry.
+- **Only "new MAC address" is detected.** Two devices answering for one address (an address
+  conflict, or ARP spoofing) are both recorded, but nothing alerts on it.
+- **Alerts aren't sent anywhere yet**; Telegram comes in Phase 5.
+- **Privacy.** The database records which device looked up which name for 30 days, SSH logins
+  and device address history for 90, and the device inventory until it is deleted. It is readable
+  only by root and the `netwatch` user.
 - **IPv4 listen address only** is configured; clients reaching the host over IPv6 aren't served.
 - **One host.** Linux with systemd only; the Python code runs on Windows for development and
   tests, the services don't. `install.sh` needs access to GitHub and PyPI.
@@ -291,7 +395,9 @@ If dnsmasq is installed, the tests also start the real resolver with the generat
 CI runs ruff, pytest on Python 3.12 to 3.14 on Linux (with dnsmasq) and 3.14 on Windows, and a
 deploy job on a real systemd host: install with DNS, query through it, check the queries are
 stored (including across a restart of the logger), fail six SSH logins against the runner's sshd
-and check each is stored once with one alert, reinstall, and uninstall `--purge`.
+and check each is stored once with one alert, scan a test LAN (a bridge with devices in network
+namespaces) and check the baseline and exactly one alert for a device that joins later, install a
+release without discovery and go forward again, reinstall, and uninstall `--purge`.
 
 AI-assisted implementation; architecture, operations and verification are human-owned.
 

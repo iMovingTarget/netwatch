@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- LAN device discovery (Phase 3). `netwatch-discovery.service`, started every five minutes by
+  `netwatch-discovery.timer`, sends an ARP request to every address in the IPv4 subnet of
+  `NETWATCH_DISCOVERY_INTERFACE` (off when unset) and records every device that answers: MAC
+  address, latest address, vendor from the IEEE registry (`ieee-data`), whether the address is
+  locally administered, first and last seen. Networks larger than a /22 are refused.
+- The first scan that finds anything is the baseline; after it, each MAC address seen for the
+  first time raises one `new-device` alert (warning). Address history (which device held which
+  address when) and new-device alerts are kept for `NETWATCH_DISCOVERY_RETENTION_DAYS` (90).
+- Commands: `netwatch devices [--unknown]`, `netwatch devices label MAC NAME`,
+  `netwatch devices scan [--from-file]`, and `examples/arp-scans.jsonl` to try them.
+- `install.sh` installs `ieee-data` and runs the first scan when discovery is configured.
+- CI scans a test LAN of network namespaces on a bridge, and installs a release without
+  discovery to check the rollback path.
+
+### Changed
+- Database schema 4 (tables `devices` and `device_addresses`). An older release refuses the
+  upgraded database; see `docs/rollback.md`.
+- Alerts are stored by a module shared by every detector (`netwatch.alerts`).
+
 ## [0.3.0] - 2026-10-28
 
 ### Added
