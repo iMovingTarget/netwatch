@@ -155,6 +155,18 @@ jobs:
           if netwatch devices scan 2> scan-error.txt; then echo "scanned without CAP_NET_RAW"; exit 1; fi
           cat scan-error.txt
           grep -F "needs the CAP_NET_RAW capability" scan-error.txt
+      - name: Installing a release without device discovery skips it, as a rollback to v0.3.0 does
+        run: |
+          set -x
+          git switch -q -c ci-no-discovery "$GITHUB_SHA"
+          git rm -q deploy/systemd/netwatch-discovery.service deploy/systemd/netwatch-discovery.timer
+          git -c user.name=CI -c user.email=ci@example.invalid commit -q -m "a release without discovery"
+          git switch -q --detach "$GITHUB_SHA"
+          sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-no-discovery | tee old.txt
+          grep -F "this release has no device discovery" old.txt
+          if ls /etc/systemd/system/netwatch-discovery*; then echo "discovery units left"; exit 1; fi
+          sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
+          systemctl is-active netwatch-discovery.timer
       - name: Re-installing the same commit reuses the build
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test | grep "reusing"
       - name: Uninstall --purge leaves nothing behind

@@ -225,9 +225,13 @@ else
     fi
 fi
 
-# 7. LAN device discovery: an ARP scan every five minutes, only if an interface is configured.
+# 7. LAN device discovery: an ARP scan every five minutes, only if an interface is configured
+# and the release being installed has it (installing a release from before v0.4.0 is a rollback).
 discovery_interface=$(setting NETWATCH_DISCOVERY_INTERFACE)
-if [ -z "$discovery_interface" ]; then
+if [ ! -e "$UNIT_DIR/netwatch-discovery.service" ]; then
+    [ -z "$discovery_interface" ] || log "this release has no device discovery: skipping it"
+    discovery_interface=""
+elif [ -z "$discovery_interface" ]; then
     log "NETWATCH_DISCOVERY_INTERFACE is not set in $CONF_DIR/netwatch.env: device discovery is off"
     systemctl disable --now --quiet netwatch-discovery.timer 2>/dev/null || true
 elif ! dpkg-query -W -f '${Status}' ieee-data 2>/dev/null | grep -q 'ok installed'; then
