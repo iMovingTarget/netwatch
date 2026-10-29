@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.png binary
+# Copies of the IEEE registry format, which uses CRLF line endings; keep them byte for byte.
+tests/fixtures/ieee-data/* -text

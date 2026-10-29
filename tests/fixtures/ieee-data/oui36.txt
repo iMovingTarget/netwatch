@@ -1,0 +1,16 @@
+OUI-36/MA-S                                                 Organization                                 
+OUI-36 Range                                                Organization                                 
+                                                            Address                                      
+
+70-B3-D5   (hex)		Example Sensors Ltd
+1AB000-1ABFFF(base 16)		Example Sensors Ltd
+				Example Street 1
+				Example City  EX  00000
+				XX
+
+70-B3-D5   (hex)		Private
+200000-2FFFFF(base 16)		Private
+				Example Street 1
+				Example City  EX  00000
+				XX
+

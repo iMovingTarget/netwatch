@@ -1,0 +1,25 @@
+OUI/MA-L                                                    Organization                                 
+company_id                                                  Organization                                 
+                                                            Address                                      
+
+00-00-5E   (hex)		ICANN, IANA Department
+00005E     (base 16)		ICANN, IANA Department
+				Example Street 1
+				Example City  EX  00000
+				XX
+
+70-B3-D5   (hex)		IEEE Registration Authority
+70B3D5     (base 16)		IEEE Registration Authority
+				Example Street 1
+				Example City  EX  00000
+				XX
+
+00-00-5F   (hex)		Exämple Ünicode GmbH
+00005F     (base 16)		Exämple Ünicode GmbH
+				Example Street 1
+				Example City  EX  00000
+				XX
+
+0Z-00-00   (hex)		Not A Real Line
+0Z0000     (base 16)		Not A Real Line
+

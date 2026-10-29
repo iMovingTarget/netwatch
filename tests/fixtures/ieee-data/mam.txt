@@ -1,0 +1,16 @@
+OUI-28/MA-M                                                 Organization                                 
+OUI-28 Range                                                Organization                                 
+                                                            Address                                      
+
+70-B3-D5   (hex)		Example Meters Ltd
+100000-1FFFFF(base 16)		Example Meters Ltd
+				Example Street 1
+				Example City  EX  00000
+				XX
+
+70-B3-D5   (hex)		Malformed Range Ltd
+ABC-DEF    (base 16)		Malformed Range Ltd
+				Example Street 1
+				Example City  EX  00000
+				XX
+
