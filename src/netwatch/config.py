@@ -11,6 +11,7 @@ in tests.
 from __future__ import annotations
 
 import ipaddress
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -30,6 +31,10 @@ DEFAULT_RETENTION_DAYS = 30
 DEFAULT_AUTH_MAX_FAILURES = 5
 DEFAULT_AUTH_WINDOW_MINUTES = 10
 DEFAULT_AUTH_RETENTION_DAYS = 90
+DEFAULT_DISCOVERY_RETENTION_DAYS = 90
+DEFAULT_OUI_DIR = "/usr/share/ieee-data"
+# Linux interface names: at most 15 characters, no slashes or whitespace.
+_INTERFACE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,14}")
 
 #: Written by install.sh into each release directory, next to its virtualenv.
 REVISION_FILE = "revision.env"
@@ -50,6 +55,9 @@ class Settings:
     auth_max_failures: int  # failed SSH logins from one address that raise an alert ...
     auth_window_minutes: int  # ... within this many minutes
     auth_retention_days: int
+    discovery_interface: str | None  # interface whose subnet is scanned; None means off
+    discovery_retention_days: int  # address history and new-device alerts
+    oui_dir: Path  # the IEEE MAC address registry (package ieee-data)
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
@@ -80,6 +88,11 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         auth_retention_days=_positive_int(
             environ, "NETWATCH_AUTH_RETENTION_DAYS", DEFAULT_AUTH_RETENTION_DAYS
         ),
+        discovery_interface=_interface(environ, "NETWATCH_DISCOVERY_INTERFACE"),
+        discovery_retention_days=_positive_int(
+            environ, "NETWATCH_DISCOVERY_RETENTION_DAYS", DEFAULT_DISCOVERY_RETENTION_DAYS
+        ),
+        oui_dir=Path(environ.get("NETWATCH_OUI_DIR", "").strip() or DEFAULT_OUI_DIR),
     )
 
 
@@ -178,6 +191,15 @@ def _networks(environ: Mapping[str, str], key: str) -> tuple[str, ...]:
         except ValueError:
             raise ConfigError(f"{key}: {item!r} is not a network such as 192.0.2.0/24") from None
     return tuple(networks)
+
+
+def _interface(environ: Mapping[str, str], key: str) -> str | None:
+    name = environ.get(key, "").strip()
+    if not name:
+        return None
+    if not _INTERFACE_NAME.fullmatch(name):
+        raise ConfigError(f"{key}: {name!r} is not a network interface name such as eth0")
+    return name
 
 
 def _urls(environ: Mapping[str, str], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
