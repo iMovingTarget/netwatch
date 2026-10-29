@@ -12,17 +12,19 @@ seen appears. Since Phase 2 it follows sshd's log and alerts on failed-login att
 Phase 1 dnsmasq answers and blocks DNS for the devices pointed at the host, with every query
 stored.
 
-Quick start below shows the commands on example data; the device inventory looks like this:
+From the VM: discovery was switched on with the router and the admin PC online. The owner's
+phone was asleep and missed that first scan, so an hour later, when it was in use, it was
+reported as new. Its Wi-Fi address was checked in the phone's settings, and it was labelled
+(addresses replaced with documentation ones):
 
 ```
-$ netwatch devices
-last scan 2026-10-29 17:15:04: 4 of 5 devices answered
-IP           MAC                FIRST SEEN           LAST SEEN            STATUS  NAME
-192.0.2.1    00:00:5e:00:53:01  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
-192.0.2.97   02:00:5e:00:53:61  2026-10-29 17:00:03  2026-10-29 17:10:03  known   [locally administered]
-192.0.2.99   00:00:5e:00:53:63  2026-10-29 17:00:03  2026-10-29 17:15:04  known   [ICANN, IANA Department]
-192.0.2.100  00:00:5e:00:53:64  2026-10-29 17:15:04  2026-10-29 17:15:04  new     [ICANN, IANA Department]
-192.0.2.120  06:00:5e:00:53:78  2026-10-29 17:10:03  2026-10-29 17:15:04  new     [locally administered]
+$ netwatch alerts -n 1
+TIME                 SEVERITY  KIND        MESSAGE
+2026-10-29 18:34:10  warning   new-device  new device 02:00:5e:00:53:61 at 192.0.2.101 (locally administered address, so no vendor; phones use these as private Wi-Fi addresses)
+$ netwatch devices label 02:00:5e:00:53:61 iPhone
+02:00:5e:00:53:61 is now known as 'iPhone'
+$ netwatch devices --unknown
+no unknown devices
 ```
 
 ## What it does
@@ -367,8 +369,9 @@ Design decisions and their trade-offs:
   passes, so it can be missing from the baseline (the owner's phone was, on the VM) and then
   alert when it wakes, or look absent for a while. A device that joins and leaves between two scans, five minutes apart,
   is never seen.
-- **Private Wi-Fi addresses that rotate look like new devices.** iOS and Android can change a
-  phone's address per network or over time; each new one is a new device and one alert.
+- **Private Wi-Fi addresses that change look like new devices.** iOS and Android can change a
+  phone's address per network or over time; each new one is a new device and one alert. On the
+  VM, turning the phone's private address off and back on gave it a different one.
 - **A Wi-Fi range extender may answer for its clients** with its own MAC address, so devices
   behind it share one entry.
 - **Only "new MAC address" is detected.** Two devices answering for one address (an address
