@@ -50,15 +50,49 @@ jobs:
       - name: Smoke-test the installed entry point
         run: netwatch --version
 
+  monitoring:
+    name: monitoring (promtool, compose, metrics format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: The compose file is valid; use its Prometheus image for promtool
+        run: |
+          export GRAFANA_LISTEN=127.0.0.1
+          docker compose -f monitoring/compose.yaml config --quiet
+          image=$(docker compose -f monitoring/compose.yaml config --images | grep prometheus)
+          echo "PROMETHEUS_IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Prometheus configuration and alert rules are valid
+        run: |
+          promtool() { docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" "$@"; }
+          promtool check config /etc/prometheus/prometheus.yml
+          promtool check rules /etc/prometheus/rules/netwatch.yml
+      - name: Alert rule unit tests
+        run: |
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules /etc/prometheus/tests/netwatch.test.yml
+      - name: netwatch metrics output passes promtool's checks
+        run: |
+          pip install .
+          export NETWATCH_STATE_DIR="$RUNNER_TEMP/state"
+          netwatch dns ingest --from-file examples/dnsmasq-journal.jsonl
+          netwatch auth watch --from-file examples/sshd-journal.jsonl
+          netwatch devices scan --from-file examples/arp-scans.jsonl
+          netwatch metrics | tee metrics.prom
+          docker run --rm -i --entrypoint promtool "$PROMETHEUS_IMAGE" check metrics < metrics.prom
+
   deploy:
-    name: deploy (install, DNS, SSH and device discovery end to end, uninstall under systemd)
+    name: deploy (install, DNS, SSH, discovery and metrics end to end, uninstall under systemd)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Lint shell scripts
-        run: shellcheck deploy/*.sh deploy/bin/netwatch .github/fake-device.sh
+        run: shellcheck deploy/*.sh deploy/bin/netwatch .github/fake-device.sh monitoring/setup.sh
       - name: Unit hardening stays at exposure 2.0 or lower
         run: systemd-analyze security --offline=yes --threshold=20 deploy/systemd/*.service
       - name: Prepare the runner
@@ -80,7 +114,8 @@ jobs:
           sudo .github/fake-device.sh dev1 198.51.100.23 00:00:5e:00:53:23
           sudo install -d -m 0750 /etc/netwatch
           printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 \
-            NETWATCH_DISCOVERY_INTERFACE=nwbr0 | sudo tee /etc/netwatch/netwatch.env
+            NETWATCH_DISCOVERY_INTERFACE=nwbr0 NETWATCH_METRICS_LISTEN=192.0.2.53 \
+            NETWATCH_METRICS_ALLOW_FROM=192.0.2.0/24 | sudo tee /etc/netwatch/netwatch.env
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
       - name: The CLI from a shell reports the deployed revision
@@ -150,6 +185,48 @@ jobs:
           netwatch devices label 02:00:5e:00:53:63 'test phone'
           test "$(netwatch devices --unknown)" = "no unknown devices"
           journalctl -u netwatch-discovery.service --no-pager -o cat | tail -n 8
+      - name: node_exporter serves Netwatch's metrics, on the listen address only
+        run: |
+          set -x
+          systemctl is-active prometheus-node-exporter.service netwatch-metrics.timer
+          sudo ss -lntp | grep ':9100 '
+          if sudo ss -lntp | grep ':9100 ' | grep -v '192.0.2.53:9100'; then
+            echo "node_exporter listens on more than the configured address"; exit 1
+          fi
+          sudo systemctl start netwatch-metrics.service
+          curl -fsS http://192.0.2.53:9100/metrics > scraped.txt
+          grep -E '^netwatch_dns_queries_total\{status="blocked"\} [1-9]' scraped.txt
+          grep -E '^netwatch_ssh_logins_total\{outcome="failed"\} [1-9]' scraped.txt
+          grep -E '^netwatch_heartbeat_timestamp_seconds\{component="dns"\}' scraped.txt
+          grep -E '^node_systemd_unit_state\{name="netwatch-dns.service",state="active"[^}]*\} 1' scraped.txt
+          # The systemd collector reports Netwatch's units and dnsmasq, nothing else.
+          if grep -E '^node_systemd_unit_state\{name="ssh' scraped.txt; then
+            echo "the systemd collector is not limited to Netwatch's units"; exit 1
+          fi
+          grep -E '^node_textfile_scrape_error 0' scraped.txt
+          # A run every minute stays out of the journal (LogLevelMax=notice).
+          if journalctl -u netwatch-metrics.service --no-pager -o cat | grep -E 'Starting|Finished'; then
+            echo "netwatch-metrics logs every run"; exit 1
+          fi
+          sudo systemd-analyze security prometheus-node-exporter.service | tail -n 1
+      - name: The monitoring stack scrapes the Netwatch host end to end
+        run: |
+          set -x
+          printf '%s\n' GRAFANA_LISTEN=127.0.0.1 NETWATCH_TARGET=192.0.2.53:9100 > monitoring/.env
+          sudo monitoring/setup.sh | tee setup.txt
+          grep -F "target netwatch: up" setup.txt
+          query() { curl -fsS --get http://127.0.0.1:9090/api/v1/query --data-urlencode "query=$1"; }
+          query 'netwatch_dns_queries_total{instance="netwatch", status="blocked"} > 0' | tee q.json
+          grep -F '"status":"blocked"' q.json
+          query 'node_systemd_unit_state{name="dnsmasq.service", state="active"}' | grep -F '"1"'
+          password=$(sudo cat monitoring/secrets/grafana_admin_password)
+          grafana() { curl -fsS -u "admin:$password" "http://127.0.0.1:3000/api/$1"; }
+          grafana dashboards/uid/netwatch-overview | grep -F '"title":"Netwatch"'
+          grafana dashboards/uid/netwatch-host | grep -F '"title":"Netwatch host"'
+          grafana datasources/uid/prometheus/health | grep -F '"status":"OK"'
+          # No anonymous access and no sign-up.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/dashboards/uid/netwatch-overview)" = 401
+          sudo docker compose -f monitoring/compose.yaml down --volumes
       - name: Scanning needs the service's capability, and says so
         run: |
           if netwatch devices scan 2> scan-error.txt; then echo "scanned without CAP_NET_RAW"; exit 1; fi
@@ -174,8 +251,13 @@ jobs:
           set -x
           sudo deploy/uninstall.sh --purge
           if systemctl is-active --quiet dnsmasq.service; then echo "dnsmasq still running"; exit 1; fi
+          if systemctl is-active --quiet prometheus-node-exporter.service; then
+            echo "node_exporter still running"; exit 1
+          fi
           for path in /opt/netwatch /etc/netwatch /var/lib/netwatch /var/lib/netwatch-blocklist \
                       /etc/dnsmasq.d/netwatch.conf /etc/systemd/system/dnsmasq.service.d/netwatch.conf \
+                      /var/lib/netwatch-metrics \
+                      /etc/systemd/system/prometheus-node-exporter.service.d/netwatch.conf \
                       /usr/local/bin/netwatch; do
             if [ -e "$path" ]; then echo "left behind: $path"; exit 1; fi
           done
