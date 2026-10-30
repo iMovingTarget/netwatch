@@ -128,6 +128,33 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(path: Path) -> sqlite3.Connection:
+    """Open an existing database for reading only, for ``netwatch metrics``.
+
+    Unlike connect() it never creates or migrates: a reader that upgraded the schema behind the
+    services' back would be a surprise. A schema other than this release's is refused.
+    """
+    try:
+        conn = sqlite3.connect(
+            f"{path.absolute().as_uri()}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_S
+        )
+    except sqlite3.Error as exc:
+        raise StorageError(f"cannot open database {path}: {exc}") from exc
+    try:
+        version = schema_version(conn)
+    except sqlite3.Error as exc:
+        conn.close()
+        raise StorageError(f"cannot read database {path}: {exc}") from exc
+    if version != SCHEMA_VERSION:
+        conn.close()
+        raise StorageError(
+            f"database {path} has schema version {version}; this Netwatch reads version"
+            f" {SCHEMA_VERSION}"
+        )
+    conn.isolation_level = None
+    return conn
+
+
 @contextmanager
 def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Run a block as one write transaction: committed on success, rolled back on error.

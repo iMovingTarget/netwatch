@@ -26,6 +26,7 @@ from netwatch import (
     dnsprobe,
     ingest,
     logsetup,
+    metrics,
     report,
     storage,
 )
@@ -153,6 +154,20 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
     alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
     alerts_cmd.set_defaults(handler=_alerts)
+
+    metrics_cmd = commands.add_parser(
+        "metrics",
+        help="write Prometheus metrics (the netwatch-metrics service)",
+        description="Read the database and print Prometheus metrics, or write them to a file"
+        " for node_exporter's textfile collector.",
+    )
+    metrics_cmd.add_argument(
+        "--output",
+        type=Path,
+        metavar="FILE",
+        help="replace FILE (a *.prom file) instead of printing to stdout",
+    )
+    metrics_cmd.set_defaults(handler=_metrics)
 
     bl = commands.add_parser("blocklist", help="manage the DNS blocklist").add_subparsers(
         dest="blocklist_command", metavar="<blocklist command>", required=True
@@ -316,6 +331,13 @@ def _devices_label(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
         if not devicedb.set_label(conn, mac, name):
             raise NetwatchError(f"no device with MAC address {mac} (see: netwatch devices)")
     print(f"{mac} is now known as {name!r}")
+    return 0
+
+
+def _metrics(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    text = metrics.run(load_settings(environ), args.output, environ)
+    if args.output is None:
+        sys.stdout.write(text)
     return 0
 
 
