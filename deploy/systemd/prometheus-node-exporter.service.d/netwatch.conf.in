@@ -1,0 +1,34 @@
+# Installed by Netwatch's install.sh as
+# /etc/systemd/system/prometheus-node-exporter.service.d/netwatch.conf, with @LISTEN@ replaced by
+# NETWATCH_METRICS_LISTEN. It replaces the package's ExecStart, so the ARGS in
+# /etc/default/prometheus-node-exporter are not used; editing that file would make it a modified
+# conffile, which unattended-upgrades then refuses to upgrade.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/prometheus-node-exporter \
+    --web.listen-address=@LISTEN@:9100 \
+    --collector.textfile.directory=/var/lib/netwatch-metrics \
+    --collector.systemd.unit-include=(netwatch-.+|dnsmasq)[.](service|timer) \
+    --collector.systemd.enable-restarts-metrics
+
+# Sandboxing the package leaves out. node_exporter reads /proc and /sys and asks systemd over
+# D-Bus for unit states; it writes nothing and needs no capabilities.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

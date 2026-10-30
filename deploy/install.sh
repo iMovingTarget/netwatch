@@ -20,7 +20,10 @@
 # blocklist, opens port 53 in ufw for NETWATCH_DNS_ALLOW_FROM only, and checks the result with
 # `netwatch dns check`. When NETWATCH_DISCOVERY_INTERFACE is set, it installs the IEEE MAC address
 # registry (ieee-data) if needed, enables the five-minute ARP scan and runs the first scan, which
-# records the devices on the LAN as the baseline. uninstall.sh reverses all of it.
+# records the devices on the LAN as the baseline. When NETWATCH_METRICS_LISTEN is set, it installs
+# Prometheus's node_exporter listening on that address only, runs `netwatch metrics` every minute
+# for node_exporter's textfile collector, and opens port 9100 in ufw for NETWATCH_METRICS_ALLOW_FROM
+# only. uninstall.sh reverses all of it.
 
 set -euo pipefail
 
@@ -36,6 +39,10 @@ DNSMASQ_DROPIN_DIR=$UNIT_DIR/dnsmasq.service.d
 # The same conf-dir rule the dnsmasq package uses (CONFIG_DIR in /etc/default/dnsmasq).
 DNSMASQ_CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
 UFW_COMMENT="netwatch dns"
+UFW_METRICS_COMMENT="netwatch metrics"
+METRICS_DIR=/var/lib/netwatch-metrics
+NODE_EXPORTER_DROPIN_DIR=$UNIT_DIR/prometheus-node-exporter.service.d
+METRICS_PORT=9100
 
 log() { printf 'install: %s\n' "$*"; }
 warn() { printf 'install: warning: %s\n' "$*" >&2; }
@@ -51,10 +58,10 @@ setting() {
         tr ',' ' '
 }
 
-# Delete every ufw rule this script added, highest number first so the numbers stay valid.
+# Delete every ufw rule with comment $1, highest number first so the numbers stay valid.
 remove_ufw_rules() {
     command -v ufw >/dev/null || return 0
-    ufw status numbered | sed -n "s/^\[ *\([0-9][0-9]*\)\].*# $UFW_COMMENT\$/\1/p" |
+    ufw status numbered | sed -n "s/^\[ *\([0-9][0-9]*\)\].*# $1\$/\1/p" |
         sort -rn | while read -r number; do
             ufw --force delete "$number" >/dev/null
         done
@@ -207,7 +214,7 @@ else
 
     # Firewall: port 53 from the configured networks to the listen addresses only.
     if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
-        remove_ufw_rules
+        remove_ufw_rules "$UFW_COMMENT"
         allow_from=$(setting NETWATCH_DNS_ALLOW_FROM)
         if [ -z "$allow_from" ]; then
             warn "NETWATCH_DNS_ALLOW_FROM is empty: no ufw rule added, so other devices" \
@@ -242,11 +249,66 @@ elif ! dpkg-query -W -f '${Status}' ieee-data 2>/dev/null | grep -q 'ok installe
         warn "could not install ieee-data: devices are recorded without a vendor"
 fi
 
-# 8. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
+# 8. Metrics for Prometheus, only if a listen address is configured and the release has them.
+# node_exporter serves the host's metrics and the file netwatch-metrics.service writes every
+# minute; Netwatch itself never listens. Its drop-in is in place before the package is installed,
+# so node_exporter never starts on every interface, even once.
+metrics_listen=$(setting NETWATCH_METRICS_LISTEN)
+if [ ! -e "$UNIT_DIR/netwatch-metrics.service" ]; then
+    [ -z "$metrics_listen" ] || log "this release has no metrics: skipping them"
+    metrics_listen=""
+elif [ -z "$metrics_listen" ]; then
+    log "NETWATCH_METRICS_LISTEN is not set in $CONF_DIR/netwatch.env: metrics are off"
+    systemctl disable --now --quiet netwatch-metrics.timer 2>/dev/null || true
+else
+    [[ $metrics_listen =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] ||
+        die "NETWATCH_METRICS_LISTEN must be one IPv4 address of this host, not '$metrics_listen'"
+    log "setting up node_exporter on $metrics_listen:$METRICS_PORT"
+    install -d -m 0755 -o "$SERVICE_USER" -g "$SERVICE_USER" "$METRICS_DIR"
+    install -d -m 0755 "$NODE_EXPORTER_DROPIN_DIR"
+    sed "s/@LISTEN@/$metrics_listen/" \
+        "$work/src/deploy/systemd/prometheus-node-exporter.service.d/netwatch.conf.in" \
+        >"$work/node-exporter.conf"
+    install -m 0644 "$work/node-exporter.conf" "$NODE_EXPORTER_DROPIN_DIR/netwatch.conf"
+    systemctl daemon-reload
+    if ! dpkg-query -W -f '${Status}' prometheus-node-exporter 2>/dev/null | grep -q 'ok installed'; then
+        log "installing prometheus-node-exporter"
+        export DEBIAN_FRONTEND=noninteractive
+        # Without recommends: prometheus-node-exporter-collectors would add a dozen timers of
+        # its own (SMART, apt, ...) that this host doesn't need.
+        apt-get install -y -q --no-install-recommends prometheus-node-exporter >/dev/null ||
+            { apt-get update -q >/dev/null &&
+                apt-get install -y -q --no-install-recommends prometheus-node-exporter >/dev/null; } ||
+            die "could not install prometheus-node-exporter"
+    fi
+    systemctl enable --quiet prometheus-node-exporter.service
+    systemctl restart prometheus-node-exporter.service ||
+        die "node_exporter did not start (journalctl -u prometheus-node-exporter)"
+
+    # Firewall: port 9100 from the Prometheus server(s) only.
+    if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
+        remove_ufw_rules "$UFW_METRICS_COMMENT"
+        scrapers=$(setting NETWATCH_METRICS_ALLOW_FROM)
+        if [ -z "$scrapers" ]; then
+            warn "NETWATCH_METRICS_ALLOW_FROM is empty: no ufw rule added, so Prometheus" \
+                "cannot scrape this host"
+        fi
+        for scraper in $scrapers; do
+            ufw allow proto tcp from "$scraper" to "$metrics_listen" port "$METRICS_PORT" \
+                comment "$UFW_METRICS_COMMENT" >/dev/null
+            log "ufw: allowed metrics scrapes from $scraper to $metrics_listen:$METRICS_PORT"
+        done
+    fi
+fi
+
+# 9. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
 started=()
 for name in "${shipped[@]}"; do
     grep -q '^\[Install\]' "$UNIT_DIR/$name" || continue
     if [ "$name" = netwatch-discovery.timer ] && [ -z "$discovery_interface" ]; then
+        continue
+    fi
+    if [ "$name" = netwatch-metrics.timer ] && [ -z "$metrics_listen" ]; then
         continue
     fi
     systemctl enable --quiet "$name"
@@ -284,7 +346,24 @@ if [ -n "$discovery_interface" ]; then
     log "${inventory%%$'\n'*}"
 fi
 
-# 9. Keep the newest few releases, never the active one.
+# The first metrics now, and proof that node_exporter serves them, instead of a minute's wait.
+if [ -n "$metrics_listen" ]; then
+    systemctl start netwatch-metrics.service ||
+        die "netwatch metrics failed (journalctl -u netwatch-metrics)"
+    served=$("$release/venv/bin/python" - "http://$metrics_listen:$METRICS_PORT/metrics" <<'PY'
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=10) as response:
+    text = response.read().decode()
+print(sum(line.startswith("netwatch_") for line in text.splitlines()))
+PY
+    ) || die "node_exporter does not answer on $metrics_listen:$METRICS_PORT"
+    [ "$served" -gt 0 ] || die "node_exporter answers but serves no netwatch metrics"
+    log "node_exporter serves $served netwatch samples on $metrics_listen:$METRICS_PORT"
+fi
+
+# 10. Keep the newest few releases, never the active one.
 find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
     sort -rn | awk -v keep="$KEEP_RELEASES" 'NR > keep { print $2 }' |
     while read -r old; do

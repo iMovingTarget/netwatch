@@ -43,7 +43,7 @@ CAPABILITIES = {"netwatch-discovery.service": "CAP_NET_RAW"}
 
 def test_every_service_runs_as_netwatch_with_only_the_capability_it_needs() -> None:
     units = sorted(UNITS.glob("netwatch-*.service"))
-    assert len(units) == 4
+    assert len(units) == 5
     for unit in units:
         settings = _settings(unit.name)
         expected = CAPABILITIES.get(unit.name, "")
@@ -67,3 +67,24 @@ def test_scan_timer_runs_every_five_minutes() -> None:
     settings = _settings("netwatch-discovery.timer")
     assert settings["OnCalendar"] == ["*:0/5"]
     assert settings["WantedBy"] == ["timers.target"]
+
+
+def test_metrics_writer_has_no_network_and_writes_where_node_exporter_reads() -> None:
+    settings = _settings("netwatch-metrics.service")
+    assert settings["PrivateNetwork"] == ["yes"]
+    assert settings["RestrictAddressFamilies"] == ["AF_UNIX"]
+    output = settings["ExecStart"][0].split("--output ")[1]
+    assert Path(output).parent.as_posix() == settings["ReadWritePaths"][0]
+    dropin = (UNITS / "prometheus-node-exporter.service.d" / "netwatch.conf.in").read_text()
+    assert f"--collector.textfile.directory={settings['ReadWritePaths'][0]} " in dropin
+
+
+def test_node_exporter_dropin_replaces_the_command_and_listens_on_one_address() -> None:
+    dropin = (UNITS / "prometheus-node-exporter.service.d" / "netwatch.conf.in").read_text()
+    lines = [line for line in dropin.splitlines() if not line.startswith("#")]
+    # An empty ExecStart= first: a drop-in adds to a service's commands unless it resets them.
+    assert lines[lines.index("[Service]") + 1] == "ExecStart="
+    assert "--web.listen-address=@LISTEN@:9100" in dropin
+    # Backslash escapes in ExecStart are unescaped by systemd; the regex must not rely on them.
+    unit_include = next(line for line in lines if "unit-include" in line)
+    assert "\\" not in unit_include.rstrip(" \\")
