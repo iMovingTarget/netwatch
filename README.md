@@ -263,6 +263,9 @@ journalctl -u 'netwatch*' -u dnsmasq
  netwatch-discovery.timer (every 5 min) -> netwatch-discovery (CAP_NET_RAW only):
      ARP request to every address in eth0's subnet -> replies -> vendor (IEEE registry)
      -> devices + address history + new-device alerts -> SQLite
+
+ netwatch-metrics.timer (every minute) -> netwatch metrics (read-only DB, no network):
+     database -> Prometheus text file -> node_exporter (LAN address) <--scrape-- Prometheus -> Grafana
 ```
 
 | Module | Role |
@@ -286,9 +289,11 @@ journalctl -u 'netwatch*' -u dnsmasq
 | `netwatch/dnsmasq.py` | Generates dnsmasq's configuration |
 | `netwatch/dnsprobe.py` | Minimal DNS client for `netwatch dns check` |
 | `netwatch/report.py` | The terminal tables; text from outside (usernames) is escaped |
+| `netwatch/metrics.py` | Reads the database (read-only) and renders Prometheus metrics for `netwatch metrics` |
 | `netwatch/storage.py` | SQLite in WAL mode, write transactions, schema versioning |
 | `netwatch/logsetup.py` | Logging to stderr, with journald priorities when stderr is the journal |
 | `deploy/` | Install, uninstall and host-check scripts, systemd units, example config |
+| `monitoring/` | Prometheus and Grafana for a separate host: Compose, scrape config, alert rules and tests, provisioned dashboards, `setup.sh` |
 
 Design decisions and their trade-offs:
 
@@ -358,6 +363,13 @@ Design decisions and their trade-offs:
   then switches the `current` symlink with `rename(2)`; installing an older ref is the rollback.
 - **SQLite in WAL mode.** One host and a low write rate don't justify a database server. WAL lets
   the CLI read while the logger writes; writes take the lock up front (`BEGIN IMMEDIATE`).
+- **Metrics through node_exporter, not a new listener.** `netwatch metrics` reads the database
+  read-only and writes a file for node_exporter's textfile collector, so the host that answers the
+  LAN's DNS opens no extra port of its own and the writer has no network at all. The counts are
+  rows stored plus rows deleted by retention, kept in the same transaction as the delete, so a
+  counter never drops (Prometheus reads a drop as a restart). Domain names, addresses and MAC
+  addresses are never labels: each distinct value is a separate series, and those are unbounded.
+  A per-minute heartbeat from each journal follower tells a stuck ingester from a quiet network.
 
 ## Limitations
 
