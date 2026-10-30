@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# Dashboards are files in the repository: changes are made there and reviewed, not in the UI.
+providers:
+  - name: netwatch
+    folder: Netwatch
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

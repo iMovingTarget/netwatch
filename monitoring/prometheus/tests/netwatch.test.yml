@@ -1,0 +1,241 @@
+# Unit tests for rules/netwatch.yml: promtool test rules tests/netwatch.test.yml
+# setup.sh runs them before (re)starting the stack, and CI runs them on every push.
+rule_files:
+  - ../rules/netwatch.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a target that stops answering is down after 3 minutes
+    interval: 1m
+    input_series:
+      - series: up{job="netwatch", instance="netwatch"}
+        values: "1 1 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: NetwatchDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: NetwatchDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: netwatch, instance: netwatch}
+            exp_annotations:
+              summary: Netwatch host does not answer scrapes
+              description: >-
+                node_exporter on netwatch has not answered for 3 minutes. The host, its network
+                or node_exporter is down; none of the other Netwatch alerts can fire until it is
+                back.
+      - eval_time: 6m
+        alertname: NetwatchTargetMissing
+        exp_alerts: []
+
+  - name: no target at all
+    interval: 1m
+    input_series:
+      - series: up{job="prometheus", instance="prometheus"}
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NetwatchTargetMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: netwatch}
+            exp_annotations:
+              summary: Prometheus has no Netwatch target
+              description: >-
+                There is no Netwatch scrape target at all. Check NETWATCH_TARGET in .env on the
+                monitoring host and run setup.sh again.
+
+  - name: a stale metrics file raises one alert, not one per timestamp in it
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0x15"
+      - series: netwatch_heartbeat_timestamp_seconds{job="netwatch", instance="netwatch", component="dns"}
+        values: "0x15"
+      - series: netwatch_discovery_last_scan_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0x15"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NetwatchMetricsStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: netwatch, instance: netwatch}
+            exp_annotations:
+              summary: Netwatch metrics are not being updated
+              description: >-
+                The metrics file on netwatch was last written 10m 0s ago; it should change every
+                minute. Check systemctl status netwatch-metrics.timer and journalctl -u
+                netwatch-metrics. Every Netwatch number in Grafana is frozen until it is fixed.
+      - eval_time: 10m
+        alertname: NetwatchIngestStalled
+        exp_alerts: []
+
+  - name: a follower without a heartbeat is stalled, the busy one next to it is not
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0+60x20"
+      - series: netwatch_heartbeat_timestamp_seconds{job="netwatch", instance="netwatch", component="dns"}
+        values: "0+60x5 300x15"
+      - series: netwatch_heartbeat_timestamp_seconds{job="netwatch", instance="netwatch", component="auth"}
+        values: "0+60x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NetwatchIngestStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: NetwatchIngestStalled
+        exp_alerts:
+          - exp_labels: {severity: critical, job: netwatch, instance: netwatch, component: dns}
+            exp_annotations:
+              summary: Netwatch's dns follower has stopped
+              description: >-
+                netwatch-dns has not recorded a heartbeat for 10m 0s; it sends one every minute,
+                busy or idle. The process is stuck or cannot write the database.
+
+  - name: long-running services must be active; oneshots between runs are not alerts
+    interval: 1m
+    input_series:
+      - series: node_systemd_unit_state{job="netwatch", instance="netwatch", name="dnsmasq.service", state="active"}
+        values: "1 1 0 0 0 0 0"
+      - series: node_systemd_unit_state{job="netwatch", instance="netwatch", name="netwatch-dns.service", state="active"}
+        values: "1x6"
+      - series: node_systemd_unit_state{job="netwatch", instance="netwatch", name="netwatch-discovery.service", state="active"}
+        values: "0x6"
+      - series: node_systemd_unit_state{job="netwatch", instance="netwatch", name="netwatch-discovery.service", state="failed"}
+        values: "0 0 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NetwatchServiceDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: netwatch
+              instance: netwatch
+              name: dnsmasq.service
+              state: active
+            exp_annotations:
+              summary: dnsmasq.service is not running
+              description: >-
+                dnsmasq.service on netwatch has not been active for 2 minutes. Without dnsmasq
+                the test devices lose DNS; without netwatch-dns or netwatch-auth, queries or
+                logins are not recorded.
+      - eval_time: 5m
+        alertname: NetwatchUnitFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: netwatch
+              instance: netwatch
+              name: netwatch-discovery.service
+              state: failed
+            exp_annotations:
+              summary: netwatch-discovery.service failed
+              description: >-
+                netwatch-discovery.service on netwatch is in the failed state, for example a
+                device scan or blocklist update that exited with an error. See journalctl -u
+                netwatch-discovery.service.
+
+  - name: a crash loop
+    interval: 1m
+    input_series:
+      - series: node_systemd_service_restart_total{job="netwatch", instance="netwatch", name="netwatch-dns.service"}
+        values: "0 1 2 3 4 5"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NetwatchServiceRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: netwatch
+              instance: netwatch
+              name: netwatch-dns.service
+            exp_annotations:
+              summary: netwatch-dns.service keeps restarting
+              description: >-
+                systemd restarted netwatch-dns.service 5 times in 15 minutes: it is crashing and
+                coming back. See journalctl -u netwatch-dns.service.
+
+  - name: scans that stop
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0+60x30"
+      - series: netwatch_discovery_last_scan_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: NetwatchDiscoveryStale
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: NetwatchDiscoveryStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: netwatch, instance: netwatch}
+            exp_annotations:
+              summary: LAN device scans have stopped
+              description: >-
+                The last LAN scan finished 25m 0s ago; scans run every five minutes. Check
+                systemctl status netwatch-discovery.timer.
+
+  - name: a blocklist that is not updated
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0+60x4500"
+      - series: netwatch_blocklist_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0x4500"
+    alert_rule_test:
+      - eval_time: 71h
+        alertname: NetwatchBlocklistStale
+        exp_alerts: []
+      - eval_time: 75h
+        alertname: NetwatchBlocklistStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: netwatch, instance: netwatch}
+            exp_annotations:
+              summary: The DNS blocklist has not been updated for 3 days
+              description: >-
+                The blocklist was built 3d 3h 0m 0s ago; it is updated daily. See journalctl -u
+                netwatch-blocklist.
+
+  - name: a disk filling up, and one nearly full
+    interval: 1m
+    input_series:
+      - series: node_filesystem_avail_bytes{job="netwatch", instance="netwatch", device="/dev/sda1", fstype="ext4", mountpoint="/"}
+        values: "20000-40x100"
+      - series: node_filesystem_size_bytes{job="netwatch", instance="netwatch", device="/dev/sda1", fstype="ext4", mountpoint="/"}
+        values: "20000x100"
+      - series: node_filesystem_avail_bytes{job="netwatch", instance="netwatch", device="/dev/sda2", fstype="ext4", mountpoint="/boot"}
+        values: "1500x100"
+      - series: node_filesystem_size_bytes{job="netwatch", instance="netwatch", device="/dev/sda2", fstype="ext4", mountpoint="/boot"}
+        values: "20000x100"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: NetwatchDiskFilling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: netwatch
+              instance: netwatch
+              device: /dev/sda1
+              fstype: ext4
+              mountpoint: /
+            exp_annotations:
+              summary: / will be full within a day
+              description: >-
+                At the rate of the last 6 hours, / on netwatch runs out of space within 24
+                hours.
+      - eval_time: 60m
+        alertname: NetwatchDiskAlmostFull
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: netwatch
+              instance: netwatch
+              device: /dev/sda2
+              fstype: ext4
+              mountpoint: /boot
+            exp_annotations:
+              summary: /boot is over 90% full
+              description: >-
+                /boot on netwatch has 7.5% space left. SQLite stops writing when the disk is
+                full, and so does the journal Netwatch reads.

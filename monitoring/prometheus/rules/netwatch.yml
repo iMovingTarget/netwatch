@@ -1,0 +1,147 @@
+# Health alerts for Netwatch: is it running, is its data fresh, is its disk filling up?
+# They fire in Prometheus and show in Grafana; sending them on (Telegram) is Phase 5.
+# Security events (failed logins, new devices) are Netwatch's own alerts, not these.
+# Unit tests: ../tests/netwatch.test.yml (promtool test rules).
+groups:
+  - name: netwatch-health
+    rules:
+      - alert: NetwatchDown
+        expr: up{job="netwatch"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: Netwatch host does not answer scrapes
+          description: >-
+            node_exporter on {{ $labels.instance }} has not answered for 3 minutes. The host,
+            its network or node_exporter is down; none of the other Netwatch alerts can fire
+            until it is back.
+
+      - alert: NetwatchTargetMissing
+        expr: absent(up{job="netwatch"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus has no Netwatch target
+          description: >-
+            There is no Netwatch scrape target at all. Check NETWATCH_TARGET in .env on the
+            monitoring host and run setup.sh again.
+
+      - alert: NetwatchMetricsStale
+        expr: time() - netwatch_metrics_generated_timestamp_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Netwatch metrics are not being updated
+          description: >-
+            The metrics file on {{ $labels.instance }} was last written
+            {{ $value | humanizeDuration }} ago; it should change every minute. Check
+            systemctl status netwatch-metrics.timer and journalctl -u netwatch-metrics. Every
+            Netwatch number in Grafana is frozen until it is fixed.
+
+      - alert: NetwatchServiceDown
+        expr: >-
+          node_systemd_unit_state{job="netwatch", state="active",
+            name=~"netwatch-dns\\.service|netwatch-auth\\.service|dnsmasq\\.service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.name }} is not running"
+          description: >-
+            {{ $labels.name }} on {{ $labels.instance }} has not been active for 2 minutes.
+            Without dnsmasq the test devices lose DNS; without netwatch-dns or netwatch-auth,
+            queries or logins are not recorded.
+
+      - alert: NetwatchUnitFailed
+        expr: node_systemd_unit_state{job="netwatch", state="failed"} == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} failed"
+          description: >-
+            {{ $labels.name }} on {{ $labels.instance }} is in the failed state, for example
+            a device scan or blocklist update that exited with an error. See
+            journalctl -u {{ $labels.name }}.
+
+      - alert: NetwatchServiceRestarting
+        expr: increase(node_systemd_service_restart_total{job="netwatch"}[15m]) > 2
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} keeps restarting"
+          description: >-
+            systemd restarted {{ $labels.name }} {{ $value | humanize }} times in 15 minutes:
+            it is crashing and coming back. See journalctl -u {{ $labels.name }}.
+
+      # The checks below compare a timestamp from the metrics file with now. When the file
+      # itself is stale, every timestamp in it is too: NetwatchMetricsStale covers that, so
+      # these stay quiet instead of all firing at once.
+      - alert: NetwatchIngestStalled
+        expr: >-
+          (time() - netwatch_heartbeat_timestamp_seconds > 300)
+          unless on (instance) (time() - netwatch_metrics_generated_timestamp_seconds > 300)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Netwatch's {{ $labels.component }} follower has stopped"
+          description: >-
+            netwatch-{{ $labels.component }} has not recorded a heartbeat for
+            {{ $value | humanizeDuration }}; it sends one every minute, busy or idle. The
+            process is stuck or cannot write the database.
+
+      - alert: NetwatchDiscoveryStale
+        expr: >-
+          (time() - netwatch_discovery_last_scan_timestamp_seconds > 900)
+          unless on (instance) (time() - netwatch_metrics_generated_timestamp_seconds > 300)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: LAN device scans have stopped
+          description: >-
+            The last LAN scan finished {{ $value | humanizeDuration }} ago; scans run every
+            five minutes. Check systemctl status netwatch-discovery.timer.
+
+      - alert: NetwatchBlocklistStale
+        expr: >-
+          (time() - netwatch_blocklist_generated_timestamp_seconds > 3 * 86400)
+          unless on (instance) (time() - netwatch_metrics_generated_timestamp_seconds > 300)
+        labels:
+          severity: warning
+        annotations:
+          summary: The DNS blocklist has not been updated for 3 days
+          description: >-
+            The blocklist was built {{ $value | humanizeDuration }} ago; it is updated daily.
+            See journalctl -u netwatch-blocklist.
+
+      - alert: NetwatchDiskFilling
+        expr: >-
+          predict_linear(node_filesystem_avail_bytes{job="netwatch", fstype!~"tmpfs|ramfs"}[6h],
+            24 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.mountpoint }} will be full within a day"
+          description: >-
+            At the rate of the last 6 hours, {{ $labels.mountpoint }} on {{ $labels.instance }}
+            runs out of space within 24 hours.
+
+      - alert: NetwatchDiskAlmostFull
+        expr: >-
+          node_filesystem_avail_bytes{job="netwatch", fstype!~"tmpfs|ramfs"}
+            / node_filesystem_size_bytes < 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.mountpoint }} is over 90% full"
+          description: >-
+            {{ $labels.mountpoint }} on {{ $labels.instance }} has
+            {{ $value | humanizePercentage }} space left. SQLite stops writing when the disk is
+            full, and so does the journal Netwatch reads.
