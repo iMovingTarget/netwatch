@@ -126,6 +126,8 @@ def test_run_stores_queries_and_reports_an_unexpected_exit(tmp_path: Path) -> No
             if b"query[A] example.com" in line
         )
         assert storage.get_meta(conn, ingest.CURSOR_KEY) == last_query
+        # The loop records a heartbeat on its first pass, not only when queries arrive.
+        assert storage.get_meta(conn, ingest.HEARTBEAT_KEY) is not None
 
 
 @POSIX_ONLY

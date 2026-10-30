@@ -138,3 +138,4 @@ def test_run_follows_sshd_and_resumes_after_the_saved_cursor(tmp_path: Path) -> 
     with closing(storage.connect(tmp_path / DB_NAME)) as conn:
         assert len(authdb.recent(conn, 100)) == 12
         assert len(alerts.recent(conn, 10)) == 1
+        assert storage.get_meta(conn, authwatch.HEARTBEAT_KEY) is not None

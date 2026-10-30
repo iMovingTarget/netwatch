@@ -147,6 +147,14 @@ def test_devices_and_last_scan(conn: sqlite3.Connection, env: dict[str, str]) ->
     assert samples["netwatch_discovery_last_scan_devices"] == 2
 
 
+def test_heartbeats_of_the_journal_followers(conn: sqlite3.Connection, env: dict[str, str]) -> None:
+    storage.set_meta(conn, "dns.heartbeat_us", "1761825600000000")
+    samples = _collect(conn, env)
+    assert samples['netwatch_heartbeat_timestamp_seconds{component="dns"}'] == 1761825600
+    # No heartbeat yet from netwatch-auth: no sample rather than a misleading 0.
+    assert 'netwatch_heartbeat_timestamp_seconds{component="auth"}' not in samples
+
+
 def test_blocklist_size_and_age_come_from_its_header(
     conn: sqlite3.Connection, env: dict[str, str], tmp_path: Path
 ) -> None:

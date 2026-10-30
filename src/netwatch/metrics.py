@@ -24,11 +24,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from netwatch import __version__, authlog, blocklist, discovery, dnslog, storage
+from netwatch import __version__, authlog, authwatch, blocklist, discovery, dnslog, ingest, storage
 from netwatch.alerts import SEVERITY_CRITICAL, SEVERITY_WARNING
 from netwatch.config import Settings, read_revision
 from netwatch.errors import NetwatchError
-from netwatch.ingest import DB_NAME
 
 DNS_STATUSES = (
     dnslog.STATUS_FORWARDED,
@@ -75,6 +74,7 @@ def collect(
             build,
             *_dns(conn),
             *_logins(conn),
+            _heartbeats(conn),
             _alerts(conn),
             *_devices(conn),
             *_blocklist(settings.blocklist_dir / blocklist.HOSTS_FILE),
@@ -152,6 +152,19 @@ def _logins(conn: sqlite3.Connection) -> list[Metric]:
     for (outcome,), count in counts.items():
         logins.add(count, outcome=outcome)
     return [logins]
+
+
+def _heartbeats(conn: sqlite3.Connection) -> Metric:
+    metric = Metric(
+        "netwatch_heartbeat_timestamp_seconds",
+        "gauge",
+        "Last sign of life from each journal follower, sent every minute even when idle.",
+    )
+    for component, key in (("dns", ingest.HEARTBEAT_KEY), ("auth", authwatch.HEARTBEAT_KEY)):
+        beat_us = storage.get_meta(conn, key)
+        if beat_us is not None:
+            metric.add(int(beat_us) / 1_000_000, component=component)
+    return metric
 
 
 def _alerts(conn: sqlite3.Connection) -> Metric:
@@ -265,7 +278,7 @@ def _number(value: float) -> str:
 
 def run(settings: Settings, output: Path | None, environ: Mapping[str, str]) -> str:
     """Collect the metrics and write them to ``output``; returns the text."""
-    db_path = settings.state_dir / DB_NAME
+    db_path = settings.state_dir / ingest.DB_NAME
     conn = storage.connect_readonly(db_path)
     try:
         text = render(
