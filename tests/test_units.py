@@ -88,3 +88,12 @@ def test_node_exporter_dropin_replaces_the_command_and_listens_on_one_address() 
     # Backslash escapes in ExecStart are unescaped by systemd; the regex must not rely on them.
     unit_include = next(line for line in lines if "unit-include" in line)
     assert "\\" not in unit_include.rstrip(" \\")
+
+
+def test_node_exporter_can_read_the_clock_sync_state() -> None:
+    # Regression: ProtectClock=yes made the timex collector fail silently (EPERM on adjtimex),
+    # so node_timex_sync_status and the clock offset were missing.
+    dropin = (UNITS / "prometheus-node-exporter.service.d" / "netwatch.conf.in").read_text()
+    settings = [line.split("=")[0] for line in dropin.splitlines() if not line.startswith("#")]
+    assert "ProtectClock" not in settings
+    assert "CapabilityBoundingSet=" in dropin.splitlines()

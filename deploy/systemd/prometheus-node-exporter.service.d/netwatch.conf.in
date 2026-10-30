@@ -23,7 +23,8 @@ PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-ProtectClock=yes
+# No ProtectClock=: its seccomp filter also blocks reading the clock's sync state (adjtimex),
+# which the timex collector needs. Without CAP_SYS_TIME the process can't set the clock anyway.
 ProtectHostname=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes

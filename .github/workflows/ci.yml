@@ -204,6 +204,9 @@ jobs:
             echo "the systemd collector is not limited to Netwatch's units"; exit 1
           fi
           grep -E '^node_textfile_scrape_error 0' scraped.txt
+          # The sandbox must not cost collectors that work without it.
+          grep -E '^node_scrape_collector_success\{collector="(timex|systemd|textfile|filesystem)"\} 1' scraped.txt
+          test "$(grep -cE '^node_scrape_collector_success\{collector="(timex|systemd|textfile|filesystem)"\} 1' scraped.txt)" -eq 4
           # A run every minute stays out of the journal (LogLevelMax=notice).
           if journalctl -u netwatch-metrics.service --no-pager -o cat | grep -E 'Starting|Finished'; then
             echo "netwatch-metrics logs every run"; exit 1
