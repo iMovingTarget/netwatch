@@ -61,3 +61,4 @@ def test_prune_deletes_old_events(conn: sqlite3.Connection) -> None:
     with storage.transaction(conn):
         assert authdb.prune(conn, 5) == 1
     assert [e.ts_us for e in authdb.recent(conn, 10)] == [10]
+    assert storage.deleted_counts(conn, "auth_events") == {("failed",): 1}

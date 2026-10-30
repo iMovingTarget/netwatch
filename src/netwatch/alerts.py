@@ -11,6 +11,8 @@ import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from netwatch import storage
+
 SEVERITY_WARNING = "warning"
 SEVERITY_CRITICAL = "critical"
 
@@ -74,7 +76,10 @@ def recent(
 
 def prune(conn: sqlite3.Connection, older_than_us: int, kinds: Sequence[str]) -> int:
     """Delete alerts of ``kinds`` from before ``older_than_us``; each detector prunes its own."""
-    return conn.execute(
-        f"DELETE FROM alerts WHERE ts_us < ? AND kind IN ({', '.join('?' * len(kinds))})",
+    return storage.delete_counted(
+        conn,
+        "alerts",
+        ("kind", "severity"),
+        f"ts_us < ? AND kind IN ({', '.join('?' * len(kinds))})",
         (older_than_us, *kinds),
-    ).rowcount
+    )

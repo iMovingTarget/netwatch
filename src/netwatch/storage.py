@@ -10,8 +10,9 @@ one write transaction, so two services starting at the same moment can't both mi
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -166,6 +167,54 @@ def put_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     return None if row is None else str(row[0])
+
+
+def delete_counted(
+    conn: sqlite3.Connection,
+    table: str,
+    group_by: Sequence[str],
+    where: str,
+    params: Sequence[object],
+) -> int:
+    """Delete the rows of ``table`` matching ``where`` and remember how many went, per group.
+
+    The metrics count rows by label (queries by status, alerts by kind). Retention deletes old
+    rows, so a plain row count would drop now and then, and Prometheus reads any drop in a
+    counter as a restart. Keeping a running total of deleted rows lets ``rows stored + rows
+    deleted`` only ever grow. The totals live in ``meta``, so the schema doesn't change.
+
+    ``table``, ``group_by`` and ``where`` come from code, never from input. Call inside
+    transaction(), so the count and the delete see the same rows. Returns how many were deleted.
+    """
+    columns = ", ".join(group_by)
+    groups = conn.execute(
+        f"SELECT {columns}, count(*) FROM {table} WHERE {where} GROUP BY {columns}", params
+    ).fetchall()
+    if not groups:
+        return 0
+    totals = deleted_counts(conn, table)
+    for *labels, count in groups:
+        key = tuple(str(label) for label in labels)
+        totals[key] = totals.get(key, 0) + count
+    put_meta(
+        conn,
+        _deleted_key(table),
+        json.dumps(sorted([*key, count] for key, count in totals.items())),
+    )
+    deleted: int = conn.execute(f"DELETE FROM {table} WHERE {where}", params).rowcount
+    return deleted
+
+
+def deleted_counts(conn: sqlite3.Connection, table: str) -> dict[tuple[str, ...], int]:
+    """How many rows of ``table`` delete_counted() has deleted so far, per group."""
+    value = get_meta(conn, _deleted_key(table))
+    if value is None:
+        return {}
+    return {tuple(row[:-1]): int(row[-1]) for row in json.loads(value)}
+
+
+def _deleted_key(table: str) -> str:
+    return f"deleted.{table}"
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

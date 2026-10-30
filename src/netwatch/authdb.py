@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 
+from netwatch import storage
 from netwatch.authlog import OUTCOME_FAILED, AuthEvent
 
 _EVENT_COLUMNS = "ts_us, source, username, outcome, method, invalid_user, message, cursor"
@@ -71,4 +72,4 @@ def failures_since(conn: sqlite3.Connection, since_us: int) -> list[tuple[str, i
 
 def prune(conn: sqlite3.Connection, older_than_us: int) -> int:
     """Delete login events from before ``older_than_us``. Returns how many were deleted."""
-    return conn.execute("DELETE FROM auth_events WHERE ts_us < ?", (older_than_us,)).rowcount
+    return storage.delete_counted(conn, "auth_events", ("outcome",), "ts_us < ?", (older_than_us,))
