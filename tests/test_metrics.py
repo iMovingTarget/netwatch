@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import stat
+import sys
 from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
@@ -204,7 +206,8 @@ def test_cli_writes_the_file_in_one_step(
     out.mkdir()
     assert main(["metrics", "--output", str(out / "netwatch.prom")], environ=env) == 0
     assert [p.name for p in out.iterdir()] == ["netwatch.prom"]
-    assert (out / "netwatch.prom").stat().st_mode & 0o777 == 0o644
+    if sys.platform != "win32":
+        assert stat.S_IMODE((out / "netwatch.prom").stat().st_mode) == 0o644
     assert "netwatch_dns_queries_total" in (out / "netwatch.prom").read_text()
 
 
