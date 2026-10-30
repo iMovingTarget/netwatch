@@ -93,3 +93,12 @@ def test_compose_pins_images_and_never_publishes_on_every_address() -> None:
             filled = re.sub(r"\$\{[^}]*\}", "HOST", port)
             assert filled.count(":") == 2, f"{name} publishes {port} on every address"
     assert compose["services"]["prometheus"]["ports"] == ["127.0.0.1:9090:9090"]
+
+
+def test_read_only_containers_have_a_writable_tmp() -> None:
+    # Regression: with a read-only root, promtool test rules failed in setup.sh with
+    # "mkdir /tmp/test_storage...: read-only file system", so setup.sh refused to start.
+    compose = yaml.safe_load((MONITORING / "compose.yaml").read_text())
+    for name, service in compose["services"].items():
+        if service.get("read_only"):
+            assert "/tmp" in service.get("tmpfs", []), name

@@ -19,6 +19,9 @@ services:
       # ssh -L 9090:127.0.0.1:9090 <user>@<this host>, then http://localhost:9090
       - "127.0.0.1:9090:9090"
     read_only: true
+    # The one writable path besides the data volume: promtool test rules (run by setup.sh in
+    # this container) builds its test databases in /tmp.
+    tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
 
