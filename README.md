@@ -12,6 +12,14 @@ Netwatch scans the LAN by ARP every five minutes and alerts on an unknown device
 it follows sshd's log and alerts on failed-login attacks; and since Phase 1 dnsmasq answers and
 blocks DNS for the devices pointed at the host, with every query stored.
 
+The first real alert came from the VM's own monitoring. On 31 October the host PC crashed and
+rebooted; the Netwatch VM came back, but node_exporter had started a few seconds before DHCP gave
+the VM its address, failed to bind it and gave up, so Prometheus fired NetwatchDown. That alert
+is how the bug was found; it was fixed (and the fix proven with a reboot) before v0.5.0 was
+tagged:
+
+![Prometheus alerts page: the eleven Netwatch health rules, NetwatchDown firing](docs/prometheus-first-alert.png)
+
 From the VM: discovery was switched on with the router and the admin PC online. The owner's
 phone was asleep and missed that first scan, so an hour later, when it was in use, it was
 reported as new. Its Wi-Fi address was checked in the phone's settings, and it was labelled
