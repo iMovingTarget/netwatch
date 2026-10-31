@@ -127,6 +127,8 @@ dashboard; sending them anywhere is Phase 5 (Telegram).
 | NetwatchDiskFilling | warning | a filesystem will be full within 24 hours at the last 6 hours' rate |
 | NetwatchDiskAlmostFull | critical | a filesystem has under 10% free |
 
+![Prometheus: the eleven Netwatch health rules, all inactive](prometheus-alerts.png)
+
 The alerts that read a timestamp from the metrics file stay quiet while the file itself is
 stale: one stopped timer raises NetwatchMetricsStale, not five alerts at once.
 
@@ -143,6 +145,8 @@ use *Export > Export as JSON*, and replace the file.
   devices; their history; service states, freshness of each sign of life, restarts, blocklist
   and database size, running version.
 - **Netwatch host:** uptime, CPU, load, memory, disk space and I/O, network.
+
+![Grafana: the Netwatch host dashboard](grafana-netwatch-host.png)
 
 ## Rolling back
 
