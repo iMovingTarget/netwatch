@@ -1,6 +1,7 @@
-# Health alerts for Netwatch: is it running, is its data fresh, is its disk filling up?
-# They fire in Prometheus and show in Grafana; sending them on (Telegram) is Phase 5.
-# Security events (failed logins, new devices) are Netwatch's own alerts, not these.
+# Health alerts for Netwatch: is it running, is its data fresh, is its disk filling up, do its
+# alerts reach the phone? They fire in Prometheus, show in Grafana, and Alertmanager sends them to
+# Telegram (../../alertmanager/). Security events (failed logins, new devices) are Netwatch's own
+# alerts, sent by netwatch-notify on the Netwatch host, not these.
 # Unit tests: ../tests/netwatch.test.yml (promtool test rules).
 groups:
   - name: netwatch-health
@@ -80,7 +81,8 @@ groups:
       # The checks below compare a timestamp from the metrics file with now. When the file
       # itself is stale, every timestamp in it is too: NetwatchMetricsStale covers that, so
       # these stay quiet instead of all firing at once.
-      - alert: NetwatchIngestStalled
+      # netwatch-dns, netwatch-auth and (while notifications are on) netwatch-notify.
+      - alert: NetwatchServiceStalled
         expr: >-
           (time() - netwatch_heartbeat_timestamp_seconds > 300)
           unless on (instance) (time() - netwatch_metrics_generated_timestamp_seconds > 300)
@@ -88,11 +90,27 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Netwatch's {{ $labels.component }} follower has stopped"
+          summary: "netwatch-{{ $labels.component }} has stopped working"
           description: >-
             netwatch-{{ $labels.component }} has not recorded a heartbeat for
             {{ $value | humanizeDuration }}; it sends one every minute, busy or idle. The
             process is stuck or cannot write the database.
+
+      # The security alerts' own delivery path, watched from outside it: this one reaches the
+      # phone through Alertmanager even when netwatch-notify is the thing that is broken.
+      - alert: NetwatchAlertsNotSent
+        expr: >-
+          (time() - netwatch_alerts_oldest_unsent_timestamp_seconds > 600)
+          unless on (instance) (time() - netwatch_metrics_generated_timestamp_seconds > 300)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Netwatch's alerts are not reaching Telegram
+          description: >-
+            An alert raised {{ $value | humanizeDuration }} ago is still waiting to be sent.
+            netwatch-notify is down, or Telegram refuses it (wrong token or chat) or cannot be
+            reached. See netwatch notify status and journalctl -u netwatch-notify.
 
       - alert: NetwatchDiscoveryStale
         expr: >-
