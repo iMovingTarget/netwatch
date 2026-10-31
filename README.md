@@ -5,12 +5,12 @@ LAN. It is built in phases: DNS logging and blocking, live detection of failed S
 device inventory with alerts for unknown devices, metrics and dashboards in Prometheus and
 Grafana, and Telegram notifications. Each phase ships as a tagged release.
 
-**Status: v0.4.0 (Phase 3, LAN device discovery).** Every five minutes Netwatch asks every
-address on the LAN which device has it (ARP), keeps an inventory of the devices that answer with
-their vendor from the IEEE registry, and raises an alert the first time a device it has never
-seen appears. Since Phase 2 it follows sshd's log and alerts on failed-login attacks, and since
-Phase 1 dnsmasq answers and blocks DNS for the devices pointed at the host, with every query
-stored.
+**Status: v0.5.0 (Phase 4, Prometheus metrics and Grafana).** The host exports its numbers and
+its own health to Prometheus through node_exporter, and a second host runs Prometheus and Grafana
+with health alerts and two dashboards ([docs/monitoring.md](docs/monitoring.md)). Since Phase 3
+Netwatch scans the LAN by ARP every five minutes and alerts on an unknown device; since Phase 2
+it follows sshd's log and alerts on failed-login attacks; and since Phase 1 dnsmasq answers and
+blocks DNS for the devices pointed at the host, with every query stored.
 
 From the VM: discovery was switched on with the router and the admin PC online. The owner's
 phone was asleep and missed that first scan, so an hour later, when it was in use, it was
@@ -35,7 +35,7 @@ no unknown devices
 | 1 | v0.2.0 | DNS logger and sinkhole: dnsmasq answers, Netwatch logs every query and manages blocklists | done |
 | 2 | v0.3.0 | Live failed-login detection for sshd, reusing [log-analyzer](https://github.com/iMovingTarget/log-analyzer) | done |
 | 3 | v0.4.0 | Periodic ARP scan, device inventory with vendors, alert on unknown devices | done |
-| 4 | v0.5.0 | Prometheus metrics and Grafana dashboards (on a separate monitoring VM), health alerts | planned |
+| 4 | v0.5.0 | Prometheus metrics and Grafana dashboards (on a separate monitoring VM), health alerts | done |
 | 5 | v0.6.0 | Telegram alerts with deduplication and cooldowns | planned |
 
 For DNS that means:
@@ -71,6 +71,18 @@ For the devices on the LAN (opt-in: set `NETWATCH_DISCOVERY_INTERFACE`, for exam
   per address, ever; it stays "new" in `netwatch devices --unknown` until it is labelled.
 - **Address history**: which device held which address and when, kept for 90 days, so a DNS
   client address can be traced to a device even after its lease changed.
+
+For metrics and dashboards (opt-in: set `NETWATCH_METRICS_LISTEN`):
+
+- **`netwatch metrics`** writes the DNS, login, alert and device numbers, each component's
+  heartbeat, the blocklist and database sizes and the running version in the Prometheus text
+  format. A timer writes it every minute; node_exporter serves it alongside the host's own
+  metrics and the systemd state of Netwatch's units. Netwatch never listens on the network for
+  this. The counters survive retention, and no domain, address or MAC becomes a metric label.
+- **A separate monitoring host** runs Prometheus and Grafana in Docker, with eleven health alerts
+  (host or a service down, a stalled follower, stale metrics, scans or blocklist, a filling disk)
+  and two dashboards. It is built from a tag like the Netwatch host is. See
+  [docs/monitoring.md](docs/monitoring.md).
 
 ## Quick start (development)
 
@@ -172,10 +184,11 @@ commit:
 ```
 git clone https://github.com/iMovingTarget/netwatch.git && cd netwatch
 sudo deploy/check-host.sh > check.txt 2>&1   # optional: read-only report of the host
-sudo deploy/install.sh v0.4.0                # first install: creates /etc/netwatch/netwatch.env
-sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN, NETWATCH_DNS_ALLOW_FROM
-                                             # and NETWATCH_DISCOVERY_INTERFACE
-sudo deploy/install.sh v0.4.0                # again, now with DNS and device discovery
+sudo deploy/install.sh v0.5.0                # first install: creates /etc/netwatch/netwatch.env
+sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN, NETWATCH_DNS_ALLOW_FROM,
+                                             # NETWATCH_DISCOVERY_INTERFACE and, for Phase 4,
+                                             # NETWATCH_METRICS_LISTEN / NETWATCH_METRICS_ALLOW_FROM
+sudo deploy/install.sh v0.5.0                # again, now with DNS, discovery and metrics
 ```
 
 The second run on the VM, upgrading from v0.3.0 to the release candidate (the LAN address
@@ -213,6 +226,8 @@ to an older version or remove Netwatch. Installing an older ref is the version r
 | `/etc/systemd/system/` | `netwatch-*` units and `dnsmasq.service.d/netwatch.conf` |
 | `/usr/local/bin/netwatch` | Runs the CLI as the `netwatch` user |
 | `/usr/share/ieee-data/` | The IEEE MAC address registry (package `ieee-data`), for vendors |
+| `/var/lib/netwatch-metrics/` | The Prometheus file node_exporter serves (world-readable) |
+| `.../prometheus-node-exporter.service.d/netwatch.conf` | node_exporter's listen address and collectors |
 
 Day-to-day commands (they run as the `netwatch` user through `/usr/local/bin/netwatch`):
 
@@ -226,6 +241,7 @@ netwatch auth recent [-n 20] [--source ADDRESS] [--failed]
 netwatch devices [--unknown]           # the inventory; --unknown: new since the baseline
 netwatch devices label MAC NAME        # name a device; it is then known
 netwatch alerts [-n 20]
+netwatch metrics [--output FILE]       # Prometheus metrics (the netwatch-metrics timer writes them)
 sudo systemctl start netwatch-discovery.service   # scan now instead of within five minutes
 journalctl -u 'netwatch*' -u dnsmasq
 ```
@@ -247,6 +263,9 @@ journalctl -u 'netwatch*' -u dnsmasq
  netwatch-discovery.timer (every 5 min) -> netwatch-discovery (CAP_NET_RAW only):
      ARP request to every address in eth0's subnet -> replies -> vendor (IEEE registry)
      -> devices + address history + new-device alerts -> SQLite
+
+ netwatch-metrics.timer (every minute) -> netwatch metrics (read-only DB, no network):
+     database -> Prometheus text file -> node_exporter (LAN address) <--scrape-- Prometheus -> Grafana
 ```
 
 | Module | Role |
@@ -270,9 +289,11 @@ journalctl -u 'netwatch*' -u dnsmasq
 | `netwatch/dnsmasq.py` | Generates dnsmasq's configuration |
 | `netwatch/dnsprobe.py` | Minimal DNS client for `netwatch dns check` |
 | `netwatch/report.py` | The terminal tables; text from outside (usernames) is escaped |
+| `netwatch/metrics.py` | Reads the database (read-only) and renders Prometheus metrics for `netwatch metrics` |
 | `netwatch/storage.py` | SQLite in WAL mode, write transactions, schema versioning |
 | `netwatch/logsetup.py` | Logging to stderr, with journald priorities when stderr is the journal |
 | `deploy/` | Install, uninstall and host-check scripts, systemd units, example config |
+| `monitoring/` | Prometheus and Grafana for a separate host: Compose, scrape config, alert rules and tests, provisioned dashboards, `setup.sh` |
 
 Design decisions and their trade-offs:
 
@@ -342,6 +363,13 @@ Design decisions and their trade-offs:
   then switches the `current` symlink with `rename(2)`; installing an older ref is the rollback.
 - **SQLite in WAL mode.** One host and a low write rate don't justify a database server. WAL lets
   the CLI read while the logger writes; writes take the lock up front (`BEGIN IMMEDIATE`).
+- **Metrics through node_exporter, not a new listener.** `netwatch metrics` reads the database
+  read-only and writes a file for node_exporter's textfile collector, so the host that answers the
+  LAN's DNS opens no extra port of its own and the writer has no network at all. The counts are
+  rows stored plus rows deleted by retention, kept in the same transaction as the delete, so a
+  counter never drops (Prometheus reads a drop as a restart). Domain names, addresses and MAC
+  addresses are never labels: each distinct value is a separate series, and those are unbounded.
+  A per-minute heartbeat from each journal follower tells a stuck ingester from a quiet network.
 
 ## Limitations
 
@@ -376,7 +404,15 @@ Design decisions and their trade-offs:
   behind it share one entry.
 - **Only "new MAC address" is detected.** Two devices answering for one address (an address
   conflict, or ARP spoofing) are both recorded, but nothing alerts on it.
-- **Alerts aren't sent anywhere yet**; Telegram comes in Phase 5.
+- **Alerts aren't sent anywhere yet**; the health alerts fire in Prometheus and show in Grafana,
+  and Netwatch's own alerts are in `netwatch alerts`, but nothing is pushed to a phone until
+  Telegram in Phase 5.
+- **The monitoring host is a second machine to keep running.** If it is down, nothing is recorded
+  while it is off and no alert can fire; Netwatch keeps working regardless, since it only writes a
+  file. Prometheus keeps 30 days or 5 GB, whichever comes first.
+- **Metrics are scraped every 30 seconds and the file is rewritten every minute**, so a burst
+  shorter than that is smoothed; per-query and per-device detail stays in the CLI, never in a
+  metric label.
 - **Privacy.** The database records which device looked up which name for 30 days, SSH logins
   and device address history for 90, and the device inventory until it is deleted. It is readable
   only by root and the `netwatch` user.
@@ -391,16 +427,20 @@ pip install -e ".[dev]"
 pytest
 ruff check .
 ruff format --check .
-shellcheck deploy/*.sh deploy/bin/netwatch
+shellcheck deploy/*.sh deploy/bin/netwatch monitoring/setup.sh
 ```
 
 If dnsmasq is installed, the tests also start the real resolver with the generated configuration.
-CI runs ruff, pytest on Python 3.12 to 3.14 on Linux (with dnsmasq) and 3.14 on Windows, and a
-deploy job on a real systemd host: install with DNS, query through it, check the queries are
-stored (including across a restart of the logger), fail six SSH logins against the runner's sshd
-and check each is stored once with one alert, scan a test LAN (a bridge with devices in network
-namespaces) and check the baseline and exactly one alert for a device that joins later, install a
-release without discovery and go forward again, reinstall, and uninstall `--purge`.
+CI runs ruff, pytest on Python 3.12 to 3.14 on Linux (with dnsmasq) and 3.14 on Windows, a
+monitoring job (promtool checks the Prometheus config, the alert rules and their unit tests, and
+the metrics output), and a deploy job on a real systemd host: install with DNS, discovery and
+metrics; query through dnsmasq and check the queries are stored (including across a restart of the
+logger); fail six SSH logins against the runner's sshd and check each is stored once with one
+alert; scan a test LAN (a bridge with devices in network namespaces) and check the baseline and
+exactly one alert for a device that joins later; check node_exporter serves Netwatch's metrics on
+the listen address only; bring up the monitoring stack and confirm Prometheus scrapes the host and
+Grafana serves the dashboards; then install a release without discovery and go forward again,
+reinstall, and uninstall `--purge`.
 
 AI-assisted implementation; architecture, operations and verification are human-owned.
 

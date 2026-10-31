@@ -48,3 +48,4 @@ def test_prune_leaves_other_detectors_alerts_alone(conn: sqlite3.Connection) -> 
         ("new-device", 1),
         (KIND_BRUTE_FORCE, 10),
     ]
+    assert storage.deleted_counts(conn, "alerts") == {(KIND_BRUTE_FORCE, "warning"): 1}

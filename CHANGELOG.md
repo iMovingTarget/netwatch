@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-30
+
+### Added
+- Metrics for Prometheus (Phase 4). `netwatch metrics [--output FILE]` writes DNS queries by
+  answer, SSH logins by outcome and alerts by kind as counters, plus devices, last scan,
+  blocklist size and age, database size, heartbeats and the running version, in the Prometheus
+  text format. Domain names, addresses and MAC addresses are never labels.
+- `netwatch-metrics.timer` writes them every minute for node_exporter's textfile collector.
+  With `NETWATCH_METRICS_LISTEN` set, `install.sh` installs Ubuntu's `prometheus-node-exporter`
+  listening on that address only, sandboxed, reporting the systemd state of Netwatch's units and
+  dnsmasq, and opens port 9100 in ufw for `NETWATCH_METRICS_ALLOW_FROM` only.
+- netwatch-dns and netwatch-auth record a heartbeat every minute, busy or idle, so a stuck
+  follower can be told apart from a quiet network.
+- `monitoring/`: Docker Compose stack for a separate monitoring host (Prometheus 3.13 LTS and
+  Grafana, pinned), eleven health alert rules with promtool unit tests, two provisioned
+  dashboards, and `setup.sh`, which checks the configuration and runs the rule tests before
+  (re)starting anything. See `docs/monitoring.md`.
+- CI runs promtool on the configuration, the rules, their tests and the metrics output, and
+  deploys the monitoring stack against a freshly installed host end to end.
+
+### Changed
+- Retention keeps a running total of the rows it deletes (in the `meta` table), so the counters
+  never go down. The database schema stays at version 4.
+
 ## [0.4.0] - 2026-10-29
 
 ### Added
@@ -97,7 +121,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - CI: ruff, pytest on Python 3.12 to 3.14 (Linux) and 3.14 (Windows), shellcheck, a unit
   hardening threshold, and an install, run and uninstall on a real systemd host.
 
-[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/iMovingTarget/netwatch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/iMovingTarget/netwatch/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/iMovingTarget/netwatch/compare/v0.1.0...v0.2.0

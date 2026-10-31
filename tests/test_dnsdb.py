@@ -71,6 +71,16 @@ def test_prune_deletes_only_older_rows(conn: sqlite3.Connection) -> None:
     assert [q.serial for q in dnsdb.recent(conn, 10)] == [3]
 
 
+def test_prune_remembers_what_it_deleted_by_status(conn: sqlite3.Connection) -> None:
+    # Regression: the query counters are rows stored plus rows pruned; without the running
+    # total, retention made them drop and Prometheus saw a counter reset.
+    blocked = _q(2, name="ads.example.com", status="blocked", answer="0.0.0.0", upstream=None)
+    with storage.transaction(conn):
+        dnsdb.store(conn, [_q(1), blocked, _q(3)])
+        dnsdb.prune(conn, older_than_us=BASE.ts_us + 3)
+    assert storage.deleted_counts(conn, "dns_queries") == {("forwarded",): 1, ("blocked",): 1}
+
+
 def test_counts_and_tops(conn: sqlite3.Connection) -> None:
     rows = [
         _q(1),

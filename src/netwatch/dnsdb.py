@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import astuple
 
+from netwatch import storage
 from netwatch.dnslog import STATUS_BLOCKED, DnsQuery
 
 _COLUMNS = "ts_us, serial, client, name, qtype, status, answer, upstream"
@@ -27,7 +28,7 @@ def store(conn: sqlite3.Connection, queries: Iterable[DnsQuery]) -> int:
 
 def prune(conn: sqlite3.Connection, older_than_us: int) -> int:
     """Delete queries logged before ``older_than_us``. Returns how many were deleted."""
-    return conn.execute("DELETE FROM dns_queries WHERE ts_us < ?", (older_than_us,)).rowcount
+    return storage.delete_counted(conn, "dns_queries", ("status",), "ts_us < ?", (older_than_us,))
 
 
 def recent(

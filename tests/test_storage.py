@@ -84,3 +84,26 @@ def test_upgrade_from_v0_3_0_keeps_alerts(tmp_path: Path) -> None:
         assert storage.schema_version(conn) == 4
         assert conn.execute("SELECT count(*) FROM alerts").fetchone()[0] == 1
         assert conn.execute("SELECT count(*) FROM device_addresses").fetchone()[0] == 0
+
+
+def test_delete_counted_remembers_deleted_rows_per_group(tmp_path: Path) -> None:
+    with closing(storage.connect(tmp_path / "nw.db")) as conn:
+        conn.execute("CREATE TABLE t (ts INTEGER, a TEXT, b TEXT)")
+        rows = [(1, "x", "p"), (2, "x", "p"), (3, "y", "q"), (9, "x", "p")]
+        conn.executemany("INSERT INTO t VALUES (?, ?, ?)", rows)
+        with storage.transaction(conn):
+            assert storage.delete_counted(conn, "t", ("a", "b"), "ts < ?", (5,)) == 3
+        with storage.transaction(conn):
+            conn.execute("INSERT INTO t VALUES (4, 'y', 'q')")
+            assert storage.delete_counted(conn, "t", ("a", "b"), "ts < ?", (5,)) == 1
+        with storage.transaction(conn):
+            # Nothing to delete leaves the totals as they were.
+            assert storage.delete_counted(conn, "t", ("a", "b"), "ts < ?", (5,)) == 0
+
+        assert storage.deleted_counts(conn, "t") == {("x", "p"): 2, ("y", "q"): 2}
+        assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+
+
+def test_deleted_counts_of_a_table_never_pruned_is_empty(tmp_path: Path) -> None:
+    with closing(storage.connect(tmp_path / "nw.db")) as conn:
+        assert storage.deleted_counts(conn, "dns_queries") == {}

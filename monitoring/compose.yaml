@@ -1,0 +1,61 @@
+# Prometheus and Grafana for Netwatch, on a monitoring host of their own (docs/monitoring.md).
+# Start and update it with setup.sh, which reads the host's settings from .env.
+name: netwatch-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.5 # the 3.13 long-term-support line
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-5GB}
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      # Prometheus's UI has no login, so it is published on this host's loopback only:
+      # ssh -L 9090:127.0.0.1:9090 <user>@<this host>, then http://localhost:9090
+      - "127.0.0.1:9090:9090"
+    read_only: true
+    # The one writable path besides the data volume: promtool test rules (run by setup.sh in
+    # this container) builds its test databases in /tmp.
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  grafana:
+    image: grafana/grafana:13.2.5
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # Read from a file, so the password is not in the container's environment.
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    secrets: [grafana_admin_password]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # Published on the LAN address only. Docker's own firewall rules let published ports
+      # bypass ufw, so the address is the boundary: never 0.0.0.0, never forwarded by the router.
+      - "${GRAFANA_LISTEN:?set GRAFANA_LISTEN in .env}:3000:3000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password

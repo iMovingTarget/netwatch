@@ -28,3 +28,6 @@ var/
 *.log
 !tests/fixtures/*.log
 !examples/*.log
+
+# The monitoring host's generated password (monitoring/setup.sh)
+monitoring/secrets/

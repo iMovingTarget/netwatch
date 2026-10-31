@@ -1,0 +1,10 @@
+[Unit]
+Description=Netwatch Prometheus metrics every minute
+Documentation=https://github.com/iMovingTarget/netwatch
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

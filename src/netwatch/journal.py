@@ -26,6 +26,7 @@ from netwatch.errors import NetwatchError
 
 COMMIT_INTERVAL_S = 1.0
 PRUNE_INTERVAL_S = 3600.0
+HEARTBEAT_INTERVAL_S = 60.0
 READ_TIMEOUT_S = 1.0
 
 log = logging.getLogger("netwatch.journal")
@@ -51,6 +52,9 @@ class Consumer(Protocol):
 
     def prune(self) -> int:
         """Delete rows past their retention period. Returns how many were deleted."""
+
+    def heartbeat(self) -> None:
+        """Record that the loop is running, whether or not anything was logged."""
 
 
 def command(matches: Sequence[str], cursor: str | None, inclusive: bool) -> list[str]:
@@ -123,6 +127,8 @@ def follow(
     """Run ``cmd`` and feed its lines to ``consumer`` until ``stop`` is set.
 
     Commits every COMMIT_INTERVAL_S and prunes every PRUNE_INTERVAL_S (and once at the start).
+    Every HEARTBEAT_INTERVAL_S (and at the start) the consumer records a heartbeat: a quiet log
+    and a stuck loop look the same in the stored rows, and the heartbeat tells them apart.
     Returns the rows added. Raises NetwatchError if the command exits on its own.
     """
     try:
@@ -134,6 +140,7 @@ def follow(
     stored = 0
     last_commit = monotonic()
     last_prune = float("-inf")
+    last_beat = float("-inf")
     try:
         while not stop.is_set():
             lines = reader.read(READ_TIMEOUT_S)
@@ -150,6 +157,9 @@ def follow(
             if now - last_prune >= PRUNE_INTERVAL_S:
                 consumer.prune()
                 last_prune = now
+            if now - last_beat >= HEARTBEAT_INTERVAL_S:
+                consumer.heartbeat()
+                last_beat = now
     finally:
         proc.terminate()
         try:

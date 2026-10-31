@@ -32,6 +32,7 @@ from netwatch.errors import NetwatchError
 from netwatch.ingest import DB_NAME
 
 CURSOR_KEY = "auth.journal_cursor"
+HEARTBEAT_KEY = "auth.heartbeat_us"
 # OpenSSH 9.8 and later log per-connection messages as sshd-session, earlier versions as sshd.
 SSHD_MATCHES = ("--identifier=sshd", "--identifier=sshd-session")
 
@@ -101,6 +102,9 @@ class AuthIngester:
         self._events, self._alerts = [], []
         self.saved_cursor = cursor
         return added
+
+    def heartbeat(self) -> None:
+        storage.set_meta(self._conn, HEARTBEAT_KEY, str(self._wall_us()))
 
     def prune(self) -> int:
         cutoff = self._wall_us() - self._retention_days * 86_400 * 1_000_000

@@ -24,6 +24,7 @@ from netwatch.dnslog import DnsQuery, QueryAssembler
 from netwatch.errors import NetwatchError
 
 CURSOR_KEY = "dns.journal_cursor"
+HEARTBEAT_KEY = "dns.heartbeat_us"
 DNSMASQ_UNIT = "dnsmasq.service"
 DB_NAME = "netwatch.db"
 
@@ -86,6 +87,9 @@ class Ingester:
         self._done = []
         self.saved_cursor = cursor
         return added
+
+    def heartbeat(self) -> None:
+        storage.set_meta(self._conn, HEARTBEAT_KEY, str(self._wall_us()))
 
     def prune(self) -> int:
         cutoff = self._wall_us() - self._retention_days * 86_400 * 1_000_000

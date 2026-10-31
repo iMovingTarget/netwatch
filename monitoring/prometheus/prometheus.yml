@@ -1,0 +1,20 @@
+# Prometheus for Netwatch. The scrape target comes from targets/netwatch.yml, which setup.sh
+# writes from NETWATCH_TARGET in .env.
+global:
+  # node_exporter re-reads Netwatch's file on every scrape; the file itself changes every minute.
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          instance: prometheus
+
+  - job_name: netwatch
+    file_sd_configs:
+      - files: [targets/*.yml]

@@ -72,6 +72,13 @@ sudo deploy/install.sh v0.4.0
 
 The device inventory comes back with the database, so the baseline isn't recorded a second time.
 
+**Metrics across a downgrade to before v0.5.0.** A release older than v0.5.0 has no
+`netwatch-metrics` unit, so `install.sh` removes it, but node_exporter stays installed and keeps
+serving the last metrics file, which no longer changes; the `NetwatchMetricsStale` alert then
+fires, correctly. Remove the stale file (`sudo rm /var/lib/netwatch-metrics/netwatch.prom`) to
+silence it, or run `uninstall.sh`, which stops node_exporter and removes it. See
+[monitoring.md](monitoring.md).
+
 ## 4. Remove Netwatch from the host
 
 ```

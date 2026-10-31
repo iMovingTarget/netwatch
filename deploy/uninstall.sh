@@ -6,6 +6,8 @@
 #
 # If Netwatch set up DNS, this stops dnsmasq and removes Netwatch's dnsmasq configuration and
 # firewall rules. Switch every device that uses this host for DNS back first (docs/rollback.md).
+# If Netwatch set up node_exporter, it stops it and removes its configuration; the package stays
+# installed, like dnsmasq's.
 
 set -euo pipefail
 
@@ -17,7 +19,9 @@ SERVICE_USER=netwatch
 BLOCKLIST_DIR=/var/lib/netwatch-blocklist
 DNSMASQ_CONF=/etc/dnsmasq.d/netwatch.conf
 DNSMASQ_DROPIN=$UNIT_DIR/dnsmasq.service.d/netwatch.conf
-UFW_COMMENT="netwatch dns"
+UFW_COMMENTS="netwatch dns|netwatch metrics"
+METRICS_DIR=/var/lib/netwatch-metrics
+NODE_EXPORTER_DROPIN=$UNIT_DIR/prometheus-node-exporter.service.d/netwatch.conf
 
 log() { printf 'uninstall: %s\n' "$*"; }
 die() {
@@ -48,16 +52,23 @@ if [ -e "$DNSMASQ_CONF" ] || [ -e "$DNSMASQ_DROPIN" ]; then
     rm -f "$DNSMASQ_CONF" "$DNSMASQ_DROPIN"
     rmdir --ignore-fail-on-non-empty "$(dirname "$DNSMASQ_DROPIN")" 2>/dev/null || true
 fi
+if [ -e "$NODE_EXPORTER_DROPIN" ]; then
+    # Without Netwatch's drop-in, node_exporter would listen on every interface.
+    log "stopping node_exporter and removing Netwatch's node_exporter configuration"
+    systemctl disable --now --quiet prometheus-node-exporter.service || true
+    rm -f "$NODE_EXPORTER_DROPIN"
+    rmdir --ignore-fail-on-non-empty "$(dirname "$NODE_EXPORTER_DROPIN")" 2>/dev/null || true
+fi
 if command -v ufw >/dev/null; then
-    ufw status numbered | sed -n "s/^\[ *\([0-9][0-9]*\)\].*# $UFW_COMMENT\$/\1/p" |
+    ufw status numbered | sed -E -n "s/^\[ *([0-9]+)\].*# ($UFW_COMMENTS)\$/\1/p" |
         sort -rn | while read -r number; do
             ufw --force delete "$number" >/dev/null
-            log "removed ufw rule $number ($UFW_COMMENT)"
+            log "removed ufw rule $number"
         done
 fi
 systemctl daemon-reload
 systemctl reset-failed 'netwatch*' 2>/dev/null || true
-rm -rf "$BLOCKLIST_DIR"
+rm -rf "$BLOCKLIST_DIR" "$METRICS_DIR"
 rm -f /usr/local/bin/netwatch
 
 if [ -e "$PREFIX" ]; then
