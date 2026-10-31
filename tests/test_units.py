@@ -97,3 +97,17 @@ def test_node_exporter_can_read_the_clock_sync_state() -> None:
     settings = [line.split("=")[0] for line in dropin.splitlines() if not line.startswith("#")]
     assert "ProtectClock" not in settings
     assert "CapabilityBoundingSet=" in dropin.splitlines()
+
+
+def test_node_exporter_waits_for_its_address_and_keeps_retrying() -> None:
+    # Regression: after a reboot of the VM, node_exporter started at 11:05:13, four seconds before
+    # DHCP gave eth0 its address. Binding the LAN address failed five times in under half a second
+    # ("cannot assign requested address"), systemd's start limit stopped the restarts, and the
+    # host's metrics stayed down until someone restarted it by hand. NetwatchDown caught it.
+    dropin = (UNITS / "prometheus-node-exporter.service.d" / "netwatch.conf.in").read_text()
+    lines = [line.strip() for line in dropin.splitlines() if not line.startswith("#")]
+    assert "Wants=network-online.target" in lines
+    assert "After=network-online.target" in lines
+    restart = next(line for line in lines if line.startswith("RestartSec="))
+    # Five restarts must take longer than the default 10 s start-limit window.
+    assert 5 * int(restart.removeprefix("RestartSec=").removesuffix("s")) > 10

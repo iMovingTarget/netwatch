@@ -3,6 +3,12 @@
 # NETWATCH_METRICS_LISTEN. It replaces the package's ExecStart, so the ARGS in
 # /etc/default/prometheus-node-exporter are not used; editing that file would make it a modified
 # conffile, which unattended-upgrades then refuses to upgrade.
+[Unit]
+# It listens on one LAN address, which may come from DHCP a few seconds into boot. Binding before
+# the address exists fails with "cannot assign requested address".
+Wants=network-online.target
+After=network-online.target
+
 [Service]
 ExecStart=
 ExecStart=/usr/bin/prometheus-node-exporter \
@@ -10,6 +16,10 @@ ExecStart=/usr/bin/prometheus-node-exporter \
     --collector.textfile.directory=/var/lib/netwatch-metrics \
     --collector.systemd.unit-include=(netwatch-.+|dnsmasq)[.](service|timer) \
     --collector.systemd.enable-restarts-metrics
+# If the address is still missing (or goes away and comes back), keep retrying. The package's
+# default of 100 ms between restarts uses up systemd's start limit (5 starts in 10 s) in half a
+# second and leaves the service failed for good; at 5 s the limit is never reached.
+RestartSec=5s
 
 # Sandboxing the package leaves out. node_exporter reads /proc and /sys and asks systemd over
 # D-Bus for unit states; it writes nothing and needs no capabilities.
