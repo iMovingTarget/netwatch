@@ -129,7 +129,14 @@ jobs:
           sudo install -d -m 0750 /etc/netwatch
           printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 \
             NETWATCH_DISCOVERY_INTERFACE=nwbr0 NETWATCH_METRICS_LISTEN=192.0.2.53 \
-            NETWATCH_METRICS_ALLOW_FROM=192.0.2.0/24 | sudo tee /etc/netwatch/netwatch.env
+            NETWATCH_METRICS_ALLOW_FROM=192.0.2.0/24 NETWATCH_TELEGRAM_CHAT_ID=42 \
+            NETWATCH_TELEGRAM_API_URL=http://127.0.0.1:8081 | sudo tee /etc/netwatch/netwatch.env
+          # A fake Telegram API on loopback, and a token for it in the root-only file.
+          token="123456789:AAE-fake_token_for_ci_$(head -c 9 /dev/urandom | base64 | tr -d '/+=')"
+          printf '%s\n' "$token" | sudo tee /etc/netwatch/telegram-bot-token > /dev/null
+          echo "TELEGRAM_MESSAGES=$RUNNER_TEMP/telegram.jsonl" >> "$GITHUB_ENV"
+          nohup python3 .github/fake-telegram.py 8081 "$token" "$RUNNER_TEMP/telegram.jsonl" \
+            > "$RUNNER_TEMP/fake-telegram.log" 2>&1 &
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
       - name: The CLI from a shell reports the deployed revision
@@ -141,7 +148,7 @@ jobs:
             sudo systemd-analyze verify "/etc/systemd/system/$(basename "$unit")"
           done
           systemctl is-active netwatch-dns.service netwatch-auth.service dnsmasq.service \
-            netwatch-blocklist.timer netwatch-discovery.timer
+            netwatch-blocklist.timer netwatch-discovery.timer netwatch-notify.service
           sudo ss -lnup | grep ':53 '
           if sudo ss -lnup | grep ':53 ' | grep dnsmasq | grep -v '192.0.2.53:53'; then
             echo "dnsmasq listens on more than the configured address"; exit 1
@@ -199,6 +206,49 @@ jobs:
           netwatch devices label 02:00:5e:00:53:63 'test phone'
           test "$(netwatch devices --unknown)" = "no unknown devices"
           journalctl -u netwatch-discovery.service --no-pager -o cat | tail -n 8
+      - name: Every alert reaches Telegram once; critical ones and tests with sound
+        run: |
+          set -x
+          # install.sh's test message went through the service, with the token from LoadCredential.
+          sudo stat -c '%U:%G %a' /etc/netwatch/telegram-bot-token | grep -Fx 'root:root 600'
+          # Alerts from the steps above: one brute force, one new device. Polls every 10 s.
+          for _ in $(seq 30); do
+            if [ "$(grep -c 'new-device' "$TELEGRAM_MESSAGES")" -ge 1 ]; then break; fi
+            sleep 1
+          done
+          netwatch notify test --message "CI: a test from the command line"
+          netwatch notify status | tee status.txt
+          grep -E '^waiting: +0$' status.txt
+          python3 - "$TELEGRAM_MESSAGES" <<'PY'
+          import json, sys
+          messages = [json.loads(line) for line in open(sys.argv[1])]
+          for m in messages:
+              print(m["disable_notification"], m["text"].replace("\n", " | "))
+          heads = [m["text"].splitlines()[0] for m in messages]
+          def sent(head):
+              return [m for m in messages if m["text"].splitlines()[0].endswith(head)]
+          assert all(m["chat_id"] == 42 for m in messages)
+          assert len([m for m in messages if "Installed netwatch" in m["text"]]) == 1, heads
+          assert len(sent("WARNING: ssh-brute-force")) == 1, heads
+          assert len(sent("WARNING: new-device")) == 1, heads
+          assert sent("WARNING: new-device")[0]["disable_notification"] is True
+          tests = sent("TEST")
+          assert len(tests) == 2 and not any(m["disable_notification"] for m in tests), heads
+          # No burst here, so nothing was folded into a summary.
+          assert not any("alerts at once" in head for head in heads), heads
+          PY
+          # The notifier's metrics: nothing waits, nothing failed.
+          sudo systemctl start netwatch-metrics.service
+          grep -E '^netwatch_alerts_unsent 0$' /var/lib/netwatch-metrics/netwatch.prom
+          grep -E '^netwatch_telegram_errors_total 0$' /var/lib/netwatch-metrics/netwatch.prom
+          grep -E '^netwatch_heartbeat_timestamp_seconds\{component="notify"\}' \
+            /var/lib/netwatch-metrics/netwatch.prom
+          journalctl -u netwatch-notify.service --no-pager -o cat | tail -n 8
+          # The token is in no log line.
+          token=$(sudo cat /etc/netwatch/telegram-bot-token)
+          if sudo journalctl -u 'netwatch*' --no-pager | grep -F "${token#*:}"; then
+            echo "the bot token is in the journal"; exit 1
+          fi
       - name: node_exporter serves Netwatch's metrics, on the listen address only
         run: |
           set -x
