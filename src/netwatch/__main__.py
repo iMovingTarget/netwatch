@@ -27,8 +27,10 @@ from netwatch import (
     ingest,
     logsetup,
     metrics,
+    notify,
     report,
     storage,
+    telegram,
 )
 from netwatch.arp import normalize_mac
 from netwatch.config import environ_with_env_file, load_settings, read_revision
@@ -154,6 +156,38 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
     alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
     alerts_cmd.set_defaults(handler=_alerts)
+
+    notify_cmd = commands.add_parser("notify", help="Telegram notifications").add_subparsers(
+        dest="notify_command", metavar="<notify command>", required=True
+    )
+    notify_run_cmd = notify_cmd.add_parser(
+        "run",
+        help="send alerts to Telegram as they are raised (the netwatch-notify service)",
+        description="Send every new alert to the Telegram chat NETWATCH_TELEGRAM_CHAT_ID until"
+        " SIGTERM or SIGINT. Reads the bot token from systemd's credentials directory, or from"
+        " NETWATCH_TELEGRAM_TOKEN_FILE.",
+    )
+    notify_run_cmd.set_defaults(handler=_notify_run)
+    notify_test_cmd = notify_cmd.add_parser(
+        "test",
+        help="send a test message through the running netwatch-notify service",
+        description="Queue a test alert and wait until netwatch-notify has sent it: proof that"
+        " the service, its token and its network access work.",
+    )
+    notify_test_cmd.add_argument("--message", help="the text to send instead of the default")
+    notify_test_cmd.set_defaults(handler=_notify_test)
+    notify_status_cmd = notify_cmd.add_parser(
+        "status", help="show what the notifier has sent, held back and still has to send"
+    )
+    notify_status_cmd.set_defaults(handler=_notify_status)
+    notify_chats_cmd = notify_cmd.add_parser(
+        "chats",
+        help="list the chats that have messaged the bot, to find the chat ID (run as root)",
+        description="Ask Telegram which chats have messaged the bot in the last 24 hours. Send"
+        " the bot a message first. Needs the bot token, which only root can read: sudo"
+        " /opt/netwatch/current/venv/bin/netwatch notify chats",
+    )
+    notify_chats_cmd.set_defaults(handler=_notify_chats)
 
     metrics_cmd = commands.add_parser(
         "metrics",
@@ -331,6 +365,42 @@ def _devices_label(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
         if not devicedb.set_label(conn, mac, name):
             raise NetwatchError(f"no device with MAC address {mac} (see: netwatch devices)")
     print(f"{mac} is now known as {name!r}")
+    return 0
+
+
+def _notify_run(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    logsetup.configure(settings.log_level, environ)
+    return notify.run(settings, _stop_on_signals(), environ)
+
+
+def _notify_test(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    text = (args.message or "").strip() or notify.DEFAULT_TEST_TEXT
+    sent = notify.send_test(settings, text)
+    assert sent.notified_us is not None
+    delay = (sent.notified_us - sent.ts_us) / 1_000_000
+    chat = settings.telegram_chat_id
+    print(f"test alert {sent.id} sent to Telegram chat {chat} in {delay:.0f} s")
+    return 0
+
+
+def _notify_status(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    with _open_db(environ) as conn:
+        found = notify.status(conn, settings)
+    print(report.notify_status(found), end="")
+    return 0
+
+
+def _notify_chats(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    settings = load_settings(environ)
+    bot = telegram.Bot(telegram.read_token(settings, environ), settings.telegram_api_url)
+    chats = bot.chats()
+    if not chats:
+        print("no chats yet: send the bot a message in Telegram (e.g. /start), then run this again")
+        return 1
+    print(report.chats_table(chats), end="")
     return 0
 
 

@@ -1,8 +1,9 @@
 """Alerts from every detector, in the one table they share.
 
-Each detector writes its alerts here: the SSH login monitor and the LAN device scan so far.
-``netwatch alerts`` reads them, and the notifier of a later phase sends each one and records when
-in ``notified_us``. Keeping them in one table gives that notifier a single place to look.
+Each detector writes its alerts here: the SSH login monitor, the LAN device scan and the notifier
+itself (restarts of the host, test messages). ``netwatch alerts`` reads them, and the notifier
+(netwatch-notify) sends each one to Telegram and records in ``notified_us`` when it dealt with it.
+Keeping them in one table gives the notifier a single place to look.
 """
 
 from __future__ import annotations
@@ -47,6 +48,49 @@ def store(conn: sqlite3.Connection, alerts: Iterable[Alert]) -> int:
         ((a.ts_us, a.kind, a.severity, a.subject, a.message) for a in alerts),
     )
     return conn.total_changes - before
+
+
+def add(conn: sqlite3.Connection, alert: Alert) -> int:
+    """Insert one alert and return its id. Call inside storage.transaction()."""
+    cursor = conn.execute(
+        f"INSERT INTO alerts ({_COLUMNS}) VALUES (?, ?, ?, ?, ?)",
+        (alert.ts_us, alert.kind, alert.severity, alert.subject, alert.message),
+    )
+    return int(cursor.lastrowid or 0)
+
+
+def get(conn: sqlite3.Connection, alert_id: int) -> StoredAlert | None:
+    row = conn.execute(
+        f"SELECT id, {_COLUMNS}, notified_us FROM alerts WHERE id = ?", (alert_id,)
+    ).fetchone()
+    return None if row is None else StoredAlert(*row)
+
+
+def unsent(conn: sqlite3.Connection, since_us: int, limit: int) -> list[StoredAlert]:
+    """Alerts from ``since_us`` on that the notifier has not dealt with yet, oldest first."""
+    rows = conn.execute(
+        f"SELECT id, {_COLUMNS}, notified_us FROM alerts"
+        " WHERE notified_us IS NULL AND ts_us >= ? ORDER BY ts_us, id LIMIT ?",
+        (since_us, limit),
+    )
+    return [StoredAlert(*row) for row in rows]
+
+
+def unsent_summary(conn: sqlite3.Connection, since_us: int) -> tuple[int, int | None]:
+    """(how many alerts wait to be sent, when the oldest of them was raised)."""
+    count, oldest = conn.execute(
+        "SELECT count(*), min(ts_us) FROM alerts WHERE notified_us IS NULL AND ts_us >= ?",
+        (since_us,),
+    ).fetchone()
+    return int(count), oldest
+
+
+def mark_notified(conn: sqlite3.Connection, ids: Iterable[int], ts_us: int) -> None:
+    """Record that the notifier dealt with these alerts. Call inside storage.transaction()."""
+    conn.executemany(
+        "UPDATE alerts SET notified_us = ? WHERE id = ? AND notified_us IS NULL",
+        ((ts_us, alert_id) for alert_id in ids),
+    )
 
 
 def subjects_since(conn: sqlite3.Connection, kind: str, since_us: int) -> list[tuple[str, int]]:
