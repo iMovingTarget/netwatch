@@ -212,6 +212,24 @@ jobs:
             echo "netwatch-metrics logs every run"; exit 1
           fi
           sudo systemd-analyze security prometheus-node-exporter.service | tail -n 1
+      - name: node_exporter recovers when its address appears after it starts (boot race)
+        run: |
+          set -x
+          # At boot the LAN address can arrive from DHCP after node_exporter starts. Recreate that:
+          # take the address away, start node_exporter, give the address back.
+          sudo ip addr del 192.0.2.53/32 dev lo
+          sudo systemctl restart prometheus-node-exporter.service || true
+          sleep 3
+          systemctl show prometheus-node-exporter.service -p ActiveState -p SubState
+          sudo ip addr add 192.0.2.53/32 dev lo
+          for _ in $(seq 20); do
+            if curl -fsS -o /dev/null http://192.0.2.53:9100/metrics; then break; fi
+            sleep 1
+          done
+          curl -fsS -o /dev/null http://192.0.2.53:9100/metrics
+          systemctl is-active prometheus-node-exporter.service
+          # dnsmasq (bind-dynamic) picks the address back up by itself.
+          for _ in $(seq 10); do netwatch dns check && break; sleep 1; done
       - name: The monitoring stack scrapes the Netwatch host end to end
         run: |
           set -x
