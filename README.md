@@ -191,22 +191,26 @@ sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN, NETWATCH
 sudo deploy/install.sh v0.5.0                # again, now with DNS, discovery and metrics
 ```
 
-The second run on the VM, upgrading from v0.3.0 to the release candidate (the LAN address
-replaced with a documentation one). The first scan records what is on the LAN as the baseline:
+The upgrade on the VM to the v0.5.0 release candidate, with DNS, discovery and metrics configured
+(LAN addresses replaced with documentation ones):
 
 ```
 install: keeping the existing /etc/netwatch/netwatch.env
 install: setting up dnsmasq on 192.0.2.53
 install: ufw: allowed DNS from 192.0.2.0/24 to 192.0.2.53
-192.0.2.53: example.com A -> NOERROR 172.66.147.243, 104.20.23.154 (44 ms)
+install: setting up node_exporter on 192.0.2.53:9100
+install: ufw: allowed metrics scrapes from 192.0.2.201 to 192.0.2.53:9100
+192.0.2.53: example.com A -> NOERROR 172.66.147.243, 104.20.23.154 (174 ms)
 192.0.2.53: 0.0.0.0.creative.hpyrdr.com A -> NOERROR 0.0.0.0 (blocked)
 install: scanning the LAN on eth0
-install: last scan 2026-10-29 17:38:41: 2 of 2 devices answered
-install: installed netwatch 0.4.0 (revision 658fa0dfdc32) from phase-3-discovery
+install: last scan 2026-10-31 12:21:31: 3 of 4 devices answered
+install: node_exporter serves 22 netwatch samples on 192.0.2.53:9100
+install: installed netwatch 0.5.0 (revision cb9ad1c4807f) from fix-node-exporter-boot
 install:   netwatch-auth.service: active
 install:   netwatch-dns.service: active
 install:   netwatch-blocklist.timer: active
 install:   netwatch-discovery.timer: active
+install:   netwatch-metrics.timer: active
 ```
 
 Then point one device's DNS at the host's LAN address and watch it with `netwatch dns recent`.
