@@ -1,0 +1,7 @@
+# Alertmanager with nowhere to send: setup.sh uses this when TELEGRAM_CHAT_ID is not set in .env.
+# Alerts still fire in Prometheus and show in Grafana and on Alertmanager's own page.
+route:
+  receiver: nowhere
+
+receivers:
+  - name: nowhere

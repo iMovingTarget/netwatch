@@ -1,0 +1,14 @@
+{{/* The Telegram message for Netwatch's health alerts: plain text, short enough for a phone. */}}
+{{ define "netwatch.telegram" -}}
+{{ if eq .Status "resolved" }}✅ RESOLVED{{ else if eq .CommonLabels.severity "critical" }}🔴 CRITICAL{{ else }}🟡 WARNING{{ end }}: {{ .CommonLabels.alertname }}
+{{- range .Alerts }}
+{{ if eq .Status "resolved" }}Resolved: {{ end }}{{ .Annotations.summary }}
+{{- if eq .Status "firing" }}
+{{ .Annotations.description }}
+Since {{ .StartsAt.UTC.Format "15:04 MST" }}.
+{{- else }}
+From {{ .StartsAt.UTC.Format "15:04" }} to {{ .EndsAt.UTC.Format "15:04 MST" }}.
+{{- end }}
+{{- end }}
+Prometheus, monitoring host
+{{- end }}

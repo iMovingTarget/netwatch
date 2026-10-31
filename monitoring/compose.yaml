@@ -1,4 +1,5 @@
-# Prometheus and Grafana for Netwatch, on a monitoring host of their own (docs/monitoring.md).
+# Prometheus, Alertmanager and Grafana for Netwatch, on a monitoring host of their own
+# (docs/monitoring.md).
 # Start and update it with setup.sh, which reads the host's settings from .env.
 name: netwatch-monitoring
 
@@ -21,6 +22,28 @@ services:
     read_only: true
     # The one writable path besides the data volume: promtool test rules (run by setup.sh in
     # this container) builds its test databases in /tmp.
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.2
+    restart: unless-stopped
+    command:
+      # setup.sh writes alertmanager.yml from telegram.yml or off.yml.
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      # One instance: no high-availability gossip, so no port 9094 to open.
+      - --cluster.listen-address=
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      # The bot token and chat ID, as files readable by Alertmanager's user only (setup.sh).
+      - ./secrets/telegram:/run/secrets/telegram:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      # No login, like Prometheus: loopback only (ssh -L 9093:127.0.0.1:9093 ...).
+      - "127.0.0.1:9093:9093"
+    read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -54,6 +77,7 @@ services:
 
 volumes:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
 
 secrets:

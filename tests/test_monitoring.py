@@ -102,3 +102,61 @@ def test_read_only_containers_have_a_writable_tmp() -> None:
     for name, service in compose["services"].items():
         if service.get("read_only"):
             assert "/tmp" in service.get("tmpfs", []), name
+
+
+ALERTMANAGER = MONITORING / "alertmanager"
+
+
+def _receivers(config: str) -> dict[str, dict[str, object]]:
+    data = yaml.safe_load((ALERTMANAGER / config).read_text())
+    return {receiver["name"]: receiver for receiver in data["receivers"]}
+
+
+def test_alertmanager_is_on_loopback_without_cluster_gossip() -> None:
+    service = yaml.safe_load((MONITORING / "compose.yaml").read_text())["services"]["alertmanager"]
+    assert service["ports"] == ["127.0.0.1:9093:9093"]
+    assert "--cluster.listen-address=" in service["command"]
+    assert "--config.file=/etc/alertmanager/alertmanager.yml" in service["command"]
+    assert "./secrets/telegram:/run/secrets/telegram:ro" in service["volumes"]
+
+
+def test_prometheus_sends_alerts_to_the_compose_alertmanager() -> None:
+    config = yaml.safe_load((MONITORING / "prometheus" / "prometheus.yml").read_text())
+    targets = config["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"]
+    assert targets == ["alertmanager:9093"]
+
+
+def test_telegram_receivers_read_their_secrets_from_files_and_send_plain_text() -> None:
+    receivers = _receivers("telegram.yml")
+    assert set(receivers) == {"telegram", "telegram-silent"}
+    for name, receiver in receivers.items():
+        (config,) = receiver["telegram_configs"]
+        # Neither the token nor the chat ID is in the committed file.
+        assert config["bot_token_file"] == "/run/secrets/telegram/bot_token", name
+        assert config["chat_id_file"] == "/run/secrets/telegram/chat_id", name
+        assert "bot_token" not in config and "chat_id" not in config, name
+        assert config["parse_mode"] == "", name
+        assert config["message"] == '{{ template "netwatch.telegram" . }}', name
+        assert config["send_resolved"] is True, name
+    assert receivers["telegram-silent"]["telegram_configs"][0]["disable_notifications"] is True
+    assert "disable_notifications" not in receivers["telegram"]["telegram_configs"][0]
+
+
+def test_warnings_go_to_the_silent_receiver_and_critical_alerts_buzz() -> None:
+    route = yaml.safe_load((ALERTMANAGER / "telegram.yml").read_text())["route"]
+    assert route["receiver"] == "telegram"
+    (warnings,) = route["routes"]
+    assert warnings["matchers"] == ['severity="warning"']
+    assert warnings["receiver"] == "telegram-silent"
+    severities = {rule["labels"]["severity"] for rule in _rules()}
+    assert severities == {"warning", "critical"}  # nothing falls through unrouted
+
+
+def test_the_template_alertmanager_uses_is_defined() -> None:
+    template = (ALERTMANAGER / "templates" / "netwatch.tmpl").read_text()
+    assert '{{ define "netwatch.telegram" -}}' in template
+
+
+def test_alertmanager_without_telegram_sends_nowhere() -> None:
+    assert list(_receivers("off.yml")) == ["nowhere"]
+    assert _receivers("off.yml")["nowhere"] == {"name": "nowhere"}

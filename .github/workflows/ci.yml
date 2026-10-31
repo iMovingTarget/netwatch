@@ -51,7 +51,7 @@ jobs:
         run: netwatch --version
 
   monitoring:
-    name: monitoring (promtool, compose, metrics format)
+    name: monitoring (promtool, amtool, compose, metrics format)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -64,6 +64,8 @@ jobs:
           docker compose -f monitoring/compose.yaml config --quiet
           image=$(docker compose -f monitoring/compose.yaml config --images | grep prometheus)
           echo "PROMETHEUS_IMAGE=$image" >> "$GITHUB_ENV"
+          image=$(docker compose -f monitoring/compose.yaml config --images | grep alertmanager)
+          echo "ALERTMANAGER_IMAGE=$image" >> "$GITHUB_ENV"
       - name: Prometheus configuration and alert rules are valid
         run: |
           promtool() { docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
@@ -74,6 +76,18 @@ jobs:
         run: |
           docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
             --entrypoint promtool "$PROMETHEUS_IMAGE" test rules /etc/prometheus/tests/netwatch.test.yml
+      - name: Both Alertmanager configurations are valid and the message template renders
+        run: |
+          mkdir -p "$RUNNER_TEMP/telegram"
+          printf '123456789:AAE-fake_token_for_ci_00000000000' > "$RUNNER_TEMP/telegram/bot_token"
+          printf '42' > "$RUNNER_TEMP/telegram/chat_id"
+          amtool() { docker run --rm -v "$PWD/monitoring/alertmanager:/etc/alertmanager:ro" \
+            -v "$RUNNER_TEMP/telegram:/run/secrets/telegram:ro" \
+            --entrypoint amtool "$ALERTMANAGER_IMAGE" "$@"; }
+          amtool check-config /etc/alertmanager/telegram.yml /etc/alertmanager/off.yml
+          amtool template render --template.glob='/etc/alertmanager/templates/*.tmpl' \
+            --template.text='{{ template "netwatch.telegram" . }}' | tee message.txt
+          grep -F 'Prometheus, monitoring host' message.txt
       - name: netwatch metrics output passes promtool's checks
         run: |
           pip install .
@@ -236,6 +250,14 @@ jobs:
           printf '%s\n' GRAFANA_LISTEN=127.0.0.1 NETWATCH_TARGET=192.0.2.53:9100 > monitoring/.env
           sudo monitoring/setup.sh | tee setup.txt
           grep -F "target netwatch: up" setup.txt
+          grep -F "target alertmanager: up" setup.txt
+          grep -F "health alerts are not sent anywhere" setup.txt
+          # Prometheus has found Alertmanager, which answers on loopback only.
+          curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers | grep -F 'alertmanager:9093'
+          curl -fsS http://127.0.0.1:9093/-/ready
+          if sudo ss -lntp | grep ':9093 ' | grep -v '127.0.0.1:9093'; then
+            echo "Alertmanager is published on more than loopback"; exit 1
+          fi
           query() { curl -fsS --get http://127.0.0.1:9090/api/v1/query --data-urlencode "query=$1"; }
           query 'netwatch_dns_queries_total{instance="netwatch", status="blocked"} > 0' | tee q.json
           grep -F '"status":"blocked"' q.json

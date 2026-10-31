@@ -1,0 +1,38 @@
+# Alertmanager for Netwatch: sends Prometheus's health alerts to Telegram. setup.sh copies this
+# file to alertmanager.yml when TELEGRAM_CHAT_ID is set in .env (off.yml otherwise) and writes the
+# chat ID next to the bot token in secrets/telegram/, which the container sees as
+# /run/secrets/telegram. Security alerts don't come through here: netwatch-notify on the Netwatch
+# host sends those with the same bot.
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: telegram
+  # One message per rule: two units down at once arrive together.
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Warnings arrive without a sound and are repeated once a day; critical alerts buzz.
+    - matchers: ['severity="warning"']
+      receiver: telegram-silent
+      repeat_interval: 24h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /run/secrets/telegram/bot_token
+        chat_id_file: /run/secrets/telegram/chat_id
+        # Plain text: an annotation with "<" or "_" in it can't break the message.
+        parse_mode: ""
+        message: '{{ template "netwatch.telegram" . }}'
+        send_resolved: true
+  - name: telegram-silent
+    telegram_configs:
+      - bot_token_file: /run/secrets/telegram/bot_token
+        chat_id_file: /run/secrets/telegram/chat_id
+        parse_mode: ""
+        message: '{{ template "netwatch.telegram" . }}'
+        send_resolved: true
+        disable_notifications: true
