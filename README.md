@@ -12,6 +12,12 @@ Netwatch scans the LAN by ARP every five minutes and alerts on an unknown device
 it follows sshd's log and alerts on failed-login attacks; and since Phase 1 dnsmasq answers and
 blocks DNS for the devices pointed at the host, with every query stored.
 
+![Grafana: the Netwatch host dashboard over 24 hours](docs/grafana-netwatch-host.png)
+
+*The Netwatch host dashboard in Grafana on 31 October. The gaps are times the host PC was down (a
+morning outage, a crash and a BIOS update); each time, the VM and its exporter came back on their
+own.*
+
 The first real alert came from the VM's own monitoring. On 31 October the host PC crashed and
 rebooted; the Netwatch VM came back, but node_exporter had started a few seconds before DHCP gave
 the VM its address, failed to bind it and gave up, so Prometheus fired NetwatchDown. That alert
