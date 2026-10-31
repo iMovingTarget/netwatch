@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from netwatch import config, telegram
+
 UNITS = Path(__file__).resolve().parent.parent / "deploy" / "systemd"
 
 
@@ -43,7 +45,7 @@ CAPABILITIES = {"netwatch-discovery.service": "CAP_NET_RAW"}
 
 def test_every_service_runs_as_netwatch_with_only_the_capability_it_needs() -> None:
     units = sorted(UNITS.glob("netwatch-*.service"))
-    assert len(units) == 5
+    assert len(units) == 6
     for unit in units:
         settings = _settings(unit.name)
         expected = CAPABILITIES.get(unit.name, "")
@@ -111,3 +113,22 @@ def test_node_exporter_waits_for_its_address_and_keeps_retrying() -> None:
     restart = next(line for line in lines if line.startswith("RestartSec="))
     # Five restarts must take longer than the default 10 s start-limit window.
     assert 5 * int(restart.removeprefix("RestartSec=").removesuffix("s")) > 10
+
+
+def test_notifier_gets_the_token_as_a_credential_and_only_web_sockets() -> None:
+    settings = _settings("netwatch-notify.service")
+    # The token comes from a root-only file through systemd, not from netwatch.env (which every
+    # service reads) or an environment variable (which child processes inherit).
+    assert settings["LoadCredential"] == ["telegram-bot-token:/etc/netwatch/telegram-bot-token"]
+    assert settings["RestrictAddressFamilies"] == ["AF_UNIX AF_INET AF_INET6"]
+    assert "SupplementaryGroups" not in settings  # no journal access
+    assert settings["Wants"] == ["network-online.target"]
+    assert settings["After"] == ["network-online.target"]
+
+
+def test_the_token_file_name_matches_the_code() -> None:
+    credential, _, path = _settings("netwatch-notify.service")["LoadCredential"][0].partition(":")
+    assert credential == telegram.CREDENTIAL_NAME
+    assert path == config.DEFAULT_TELEGRAM_TOKEN_FILE
+    install = (UNITS.parent / "install.sh").read_text()
+    assert "TOKEN_FILE=$CONF_DIR/telegram-bot-token" in install

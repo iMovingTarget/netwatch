@@ -23,7 +23,8 @@
 # records the devices on the LAN as the baseline. When NETWATCH_METRICS_LISTEN is set, it installs
 # Prometheus's node_exporter listening on that address only, runs `netwatch metrics` every minute
 # for node_exporter's textfile collector, and opens port 9100 in ufw for NETWATCH_METRICS_ALLOW_FROM
-# only. uninstall.sh reverses all of it.
+# only. When NETWATCH_TELEGRAM_CHAT_ID is set and the bot token is in /etc/netwatch/telegram-bot-token,
+# it starts netwatch-notify and sends a test message through it. uninstall.sh reverses all of it.
 
 set -euo pipefail
 
@@ -43,6 +44,8 @@ UFW_METRICS_COMMENT="netwatch metrics"
 METRICS_DIR=/var/lib/netwatch-metrics
 NODE_EXPORTER_DROPIN_DIR=$UNIT_DIR/prometheus-node-exporter.service.d
 METRICS_PORT=9100
+# The Telegram bot token: root only. netwatch-notify gets it through LoadCredential=.
+TOKEN_FILE=$CONF_DIR/telegram-bot-token
 
 log() { printf 'install: %s\n' "$*"; }
 warn() { printf 'install: warning: %s\n' "$*" >&2; }
@@ -301,7 +304,34 @@ else
     fi
 fi
 
-# 9. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
+# 9. Telegram notifications, only if a chat is configured and the release has the notifier. The
+# token stays in its own root-only file, not in netwatch.env, which every Netwatch service reads.
+chat_id=$(setting NETWATCH_TELEGRAM_CHAT_ID)
+notify=false
+if [ ! -e "$UNIT_DIR/netwatch-notify.service" ]; then
+    [ -z "$chat_id" ] || log "this release has no Telegram notifications: skipping them"
+elif [ -z "$chat_id" ]; then
+    systemctl disable --now --quiet netwatch-notify.service 2>/dev/null || true
+    if [ -s "$TOKEN_FILE" ]; then
+        # Halfway set up: the token is there, the chat isn't. Show the chats that wrote to the bot.
+        chown root:root "$TOKEN_FILE"
+        chmod 0600 "$TOKEN_FILE"
+        log "Telegram: a bot token is in $TOKEN_FILE, but NETWATCH_TELEGRAM_CHAT_ID is not set."
+        log "Chats that have messaged the bot (send it /start first if this is empty):"
+        "$release/venv/bin/netwatch" notify chats || true
+        log "Set NETWATCH_TELEGRAM_CHAT_ID in $CONF_DIR/netwatch.env and run this again."
+    else
+        log "NETWATCH_TELEGRAM_CHAT_ID is not set in $CONF_DIR/netwatch.env: notifications are off"
+    fi
+else
+    [ -s "$TOKEN_FILE" ] ||
+        die "NETWATCH_TELEGRAM_CHAT_ID is set, but there is no bot token in $TOKEN_FILE (docs/alerting.md)"
+    chown root:root "$TOKEN_FILE"
+    chmod 0600 "$TOKEN_FILE"
+    notify=true
+fi
+
+# 10. (Re)start everything that has an [Install] section; timer-driven services start on schedule.
 started=()
 for name in "${shipped[@]}"; do
     grep -q '^\[Install\]' "$UNIT_DIR/$name" || continue
@@ -309,6 +339,9 @@ for name in "${shipped[@]}"; do
         continue
     fi
     if [ "$name" = netwatch-metrics.timer ] && [ -z "$metrics_listen" ]; then
+        continue
+    fi
+    if [ "$name" = netwatch-notify.service ] && ! $notify; then
         continue
     fi
     systemctl enable --quiet "$name"
@@ -363,7 +396,16 @@ PY
     log "node_exporter serves $served netwatch samples on $metrics_listen:$METRICS_PORT"
 fi
 
-# 10. Keep the newest few releases, never the active one.
+# A message through the running notifier: proof that the token, the chat and the network work,
+# and a record in the chat of what was installed when.
+if $notify; then
+    log "sending a test message to Telegram chat $chat_id"
+    runuser -u "$SERVICE_USER" -- "$release/venv/bin/netwatch" notify test \
+        --message "Installed $version from $ref on $(hostname)." ||
+        die "the test message was not sent (journalctl -u netwatch-notify)"
+fi
+
+# 11. Keep the newest few releases, never the active one.
 find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
     sort -rn | awk -v keep="$KEEP_RELEASES" 'NR > keep { print $2 }' |
     while read -r old; do
