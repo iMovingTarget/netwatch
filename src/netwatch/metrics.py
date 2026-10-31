@@ -24,7 +24,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from netwatch import __version__, authlog, authwatch, blocklist, discovery, dnslog, ingest, storage
+from netwatch import (
+    __version__,
+    alerts,
+    authlog,
+    authwatch,
+    blocklist,
+    discovery,
+    dnslog,
+    ingest,
+    notify,
+    storage,
+)
 from netwatch.alerts import SEVERITY_CRITICAL, SEVERITY_WARNING
 from netwatch.config import Settings, read_revision
 from netwatch.errors import NetwatchError
@@ -41,6 +52,7 @@ ALERT_KINDS = (
     (authlog.KIND_BRUTE_FORCE, SEVERITY_WARNING),
     (authlog.KIND_LOGIN_AFTER_FAILURES, SEVERITY_CRITICAL),
     (discovery.KIND_NEW_DEVICE, SEVERITY_WARNING),
+    (notify.KIND_RESTART, SEVERITY_WARNING),
 )
 
 Labels = tuple[tuple[str, str], ...]
@@ -74,8 +86,9 @@ def collect(
             build,
             *_dns(conn),
             *_logins(conn),
-            _heartbeats(conn),
+            _heartbeats(conn, settings),
             _alerts(conn),
+            *_notifications(conn, settings),
             *_devices(conn),
             *_blocklist(settings.blocklist_dir / blocklist.HOSTS_FILE),
             Metric(
@@ -154,13 +167,17 @@ def _logins(conn: sqlite3.Connection) -> list[Metric]:
     return [logins]
 
 
-def _heartbeats(conn: sqlite3.Connection) -> Metric:
+def _heartbeats(conn: sqlite3.Connection, settings: Settings) -> Metric:
     metric = Metric(
         "netwatch_heartbeat_timestamp_seconds",
         "gauge",
-        "Last sign of life from each journal follower, sent every minute even when idle.",
+        "Last sign of life from each long-running service, sent every minute even when idle.",
     )
-    for component, key in (("dns", ingest.HEARTBEAT_KEY), ("auth", authwatch.HEARTBEAT_KEY)):
+    components = [("dns", ingest.HEARTBEAT_KEY), ("auth", authwatch.HEARTBEAT_KEY)]
+    # Only while notifications are on: a notifier switched off on purpose is not a stalled one.
+    if settings.telegram_chat_id is not None:
+        components.append(("notify", notify.HEARTBEAT_KEY))
+    for component, key in components:
         beat_us = storage.get_meta(conn, key)
         if beat_us is not None:
             metric.add(int(beat_us) / 1_000_000, component=component)
@@ -179,6 +196,35 @@ def _alerts(conn: sqlite3.Connection) -> Metric:
     for (kind, severity), count in sorted(counts.items()):
         metric.add(count, kind=kind, severity=severity)
     return metric
+
+
+def _notifications(conn: sqlite3.Connection, settings: Settings) -> list[Metric]:
+    handled = Metric(
+        "netwatch_alerts_notified_total",
+        "counter",
+        "Alerts netwatch-notify dealt with: sent one by one, summarised in one message with"
+        " others, or suppressed as a repeat within the cooldown.",
+    )
+    for result, count in notify.counts(conn).items():
+        handled.add(count, result=result)
+    errors = Metric(
+        "netwatch_telegram_errors_total",
+        "counter",
+        "Messages Telegram did not accept or could not be reached for; each is retried.",
+    ).add(notify.telegram_errors(conn))
+    unsent = Metric("netwatch_alerts_unsent", "gauge", "Alerts waiting to be sent to Telegram.")
+    oldest = Metric(
+        "netwatch_alerts_oldest_unsent_timestamp_seconds",
+        "gauge",
+        "When the oldest alert still waiting to be sent was raised.",
+    )
+    baseline = storage.get_meta(conn, notify.BASELINE_KEY)
+    if settings.telegram_chat_id is not None and baseline is not None:
+        count, first_us = alerts.unsent_summary(conn, int(baseline))
+        unsent.add(count)
+        if first_us is not None:
+            oldest.add(first_us / 1_000_000)
+    return [handled, errors, unsent, oldest]
 
 
 def _devices(conn: sqlite3.Connection) -> list[Metric]:

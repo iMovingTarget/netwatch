@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from netwatch import alerts, authdb, dnsdb, metrics, storage
+from netwatch import alerts, authdb, dnsdb, metrics, notify, storage
 from netwatch.__main__ import main
 from netwatch.alerts import Alert
 from netwatch.authlog import AuthEvent
@@ -155,6 +155,36 @@ def test_heartbeats_of_the_journal_followers(conn: sqlite3.Connection, env: dict
     assert samples['netwatch_heartbeat_timestamp_seconds{component="dns"}'] == 1761825600
     # No heartbeat yet from netwatch-auth: no sample rather than a misleading 0.
     assert 'netwatch_heartbeat_timestamp_seconds{component="auth"}' not in samples
+
+
+def test_notifier_metrics_only_while_notifications_are_on(
+    conn: sqlite3.Connection, env: dict[str, str]
+) -> None:
+    storage.set_meta(conn, notify.BASELINE_KEY, "1000000")
+    storage.set_meta(conn, notify.HEARTBEAT_KEY, "1761825600000000")
+    with storage.transaction(conn):
+        alerts.store(conn, [Alert(500_000, "new-device", "warning", "m", "before the baseline")])
+        alerts.store(conn, [Alert(2_000_000, "new-device", "warning", "m", "waiting")])
+    off = _collect(conn, env)
+    # The counters exist either way; what waits, and the heartbeat, only when it is switched on.
+    assert off['netwatch_alerts_notified_total{result="sent"}'] == 0
+    assert off["netwatch_telegram_errors_total"] == 0
+    assert "netwatch_alerts_unsent" not in off
+    assert 'netwatch_heartbeat_timestamp_seconds{component="notify"}' not in off
+
+    on = _collect(conn, {**env, "NETWATCH_TELEGRAM_CHAT_ID": "42"})
+    assert on["netwatch_alerts_unsent"] == 1  # the alert from before the baseline never counts
+    assert on["netwatch_alerts_oldest_unsent_timestamp_seconds"] == 2
+    assert on['netwatch_heartbeat_timestamp_seconds{component="notify"}'] == 1761825600
+    assert on['netwatch_alerts_total{kind="restart",severity="warning"}'] == 0
+
+
+def test_notifier_counts_come_from_meta(conn: sqlite3.Connection, env: dict[str, str]) -> None:
+    storage.set_meta(conn, notify.COUNTS_KEY, '{"sent": 3, "suppressed": 1, "summarised": 12}')
+    storage.set_meta(conn, notify.ERRORS_KEY, "2")
+    samples = _collect(conn, env)
+    assert samples['netwatch_alerts_notified_total{result="summarised"}'] == 12
+    assert samples["netwatch_telegram_errors_total"] == 2
 
 
 def test_blocklist_size_and_age_come_from_its_header(
