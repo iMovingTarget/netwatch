@@ -143,15 +143,17 @@ chmod 0644 prometheus/targets/netwatch.yml
 
 # 4. Check before restarting anything.
 docker compose config --quiet || die "compose.yaml or .env is invalid (see above)"
+# -T and </dev/null: `docker compose run` would otherwise read this script's stdin, and when
+# setup.sh is one of several commands piped into bash over SSH, the commands after it vanish.
 promtool() {
-    docker compose run --rm --no-deps --quiet-pull --entrypoint promtool prometheus "$@"
+    docker compose run -T --rm --no-deps --quiet-pull --entrypoint promtool prometheus "$@" </dev/null
 }
 promtool check config /etc/prometheus/prometheus.yml >/dev/null ||
     die "the Prometheus configuration is invalid (see above)"
 promtool test rules /etc/prometheus/tests/netwatch.test.yml >/dev/null ||
     die "the alert rules failed their unit tests (see above)"
-docker compose run --rm --no-deps --quiet-pull --entrypoint amtool alertmanager \
-    check-config /etc/alertmanager/alertmanager.yml >/dev/null ||
+docker compose run -T --rm --no-deps --quiet-pull --entrypoint amtool alertmanager \
+    check-config /etc/alertmanager/alertmanager.yml </dev/null >/dev/null ||
     die "the Alertmanager configuration is invalid (see above)"
 log "configuration and alert rule tests pass"
 

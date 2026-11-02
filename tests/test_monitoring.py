@@ -197,3 +197,14 @@ def test_the_test_alert_has_a_start_and_no_link_in_its_text() -> None:
     texts = re.findall(r"--annotation='[a-z]+=\"([^\"]+)\"'", block)
     assert len(texts) == 2
     assert not any(re.search(r"\b[\w-]+\.(sh|py|md|io|ai)\b", text) for text in texts), texts
+
+
+def test_no_docker_compose_call_in_setup_reads_stdin() -> None:
+    # Regression: on 2 November `docker compose run` (promtool, amtool) read the rest of a script
+    # piped into `bash -s` over SSH, so the `setup.sh --test-alert` after `setup.sh` never ran;
+    # `docker compose exec` had done the same to the commands after --test-alert.
+    setup = (MONITORING / "setup.sh").read_text()
+    calls = re.findall(r"^[ \t]*docker compose (?:run|exec)\b.*?(?<!\\)\n", setup, re.S | re.M)
+    assert len(calls) == 3
+    for call in calls:
+        assert " -T " in call and "</dev/null" in call, call
