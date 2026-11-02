@@ -175,3 +175,12 @@ def test_the_test_alert_command_quotes_annotations_and_closes_stdin() -> None:
     for value in annotations:
         assert re.fullmatch(r"'[a-z]+=\"[^\"]+\"'", value), value
     assert "</dev/null" in block
+
+
+def test_each_test_alert_is_a_new_alert() -> None:
+    # Regression: a second setup.sh --test-alert within 4 hours sent nothing on 2 November.
+    # Alertmanager's notification log had already sent a message about an alert with exactly the
+    # same labels, and it repeats one only after repeat_interval.
+    setup = (MONITORING / "setup.sh").read_text()
+    add = next(line for line in setup.splitlines() if "alert add NetwatchTestAlert" in line)
+    assert 'run="$(date' in add
