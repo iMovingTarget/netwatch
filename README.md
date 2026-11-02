@@ -5,12 +5,15 @@ LAN. It is built in phases: DNS logging and blocking, live detection of failed S
 device inventory with alerts for unknown devices, metrics and dashboards in Prometheus and
 Grafana, and Telegram notifications. Each phase ships as a tagged release.
 
-**Status: v0.5.0 (Phase 4, Prometheus metrics and Grafana).** The host exports its numbers and
-its own health to Prometheus through node_exporter, and a second host runs Prometheus and Grafana
-with health alerts and two dashboards ([docs/monitoring.md](docs/monitoring.md)). Since Phase 3
-Netwatch scans the LAN by ARP every five minutes and alerts on an unknown device; since Phase 2
-it follows sshd's log and alerts on failed-login attacks; and since Phase 1 dnsmasq answers and
-blocks DNS for the devices pointed at the host, with every query stored.
+**Status: v0.6.0 (Phase 5, Telegram alerts); all five phases are done.** Netwatch's security
+alerts (failed-login attacks, unknown devices, restarts of its host) and the monitoring host's
+health alerts arrive in a private Telegram chat, critical ones with sound
+([docs/alerting.md](docs/alerting.md)). Since Phase 4 the host exports its numbers and its own
+health to Prometheus through node_exporter, and a second host runs Prometheus, Alertmanager and
+Grafana with health alerts and two dashboards ([docs/monitoring.md](docs/monitoring.md)). Since
+Phase 3 Netwatch scans the LAN by ARP every five minutes and alerts on an unknown device; since
+Phase 2 it follows sshd's log and alerts on failed-login attacks; and since Phase 1 dnsmasq
+answers and blocks DNS for the devices pointed at the host, with every query stored.
 
 ![Grafana: the Netwatch host dashboard over 24 hours](docs/grafana-netwatch-host.png)
 
@@ -50,7 +53,7 @@ no unknown devices
 | 2 | v0.3.0 | Live failed-login detection for sshd, reusing [log-analyzer](https://github.com/iMovingTarget/log-analyzer) | done |
 | 3 | v0.4.0 | Periodic ARP scan, device inventory with vendors, alert on unknown devices | done |
 | 4 | v0.5.0 | Prometheus metrics and Grafana dashboards (on a separate monitoring VM), health alerts | done |
-| 5 | v0.6.0 | Telegram alerts with deduplication and cooldowns | planned |
+| 5 | v0.6.0 | Telegram alerts with deduplication and cooldowns, health alerts through Alertmanager | done |
 
 For DNS that means:
 
@@ -70,8 +73,8 @@ For SSH logins on the host:
   configurable). One alert per address per window, however long the attack goes on.
 - **ssh-login-after-failures** (critical): a successful login from an address with a
   brute-force alert in the last window. One per brute-force alert.
-- Alerts go to a table every detector shares; Phase 5 sends them to Telegram. Until then they
-  are in `netwatch alerts` and in the journal at warning priority.
+- Alerts go to a table every detector shares (`netwatch alerts`, and the journal at warning
+  priority); `netwatch-notify` sends them to Telegram.
 
 For the devices on the LAN (opt-in: set `NETWATCH_DISCOVERY_INTERFACE`, for example `eth0`):
 
@@ -93,10 +96,26 @@ For metrics and dashboards (opt-in: set `NETWATCH_METRICS_LISTEN`):
   format. A timer writes it every minute; node_exporter serves it alongside the host's own
   metrics and the systemd state of Netwatch's units. Netwatch never listens on the network for
   this. The counters survive retention, and no domain, address or MAC becomes a metric label.
-- **A separate monitoring host** runs Prometheus and Grafana in Docker, with eleven health alerts
-  (host or a service down, a stalled follower, stale metrics, scans or blocklist, a filling disk)
-  and two dashboards. It is built from a tag like the Netwatch host is. See
-  [docs/monitoring.md](docs/monitoring.md).
+- **A separate monitoring host** runs Prometheus, Alertmanager and Grafana in Docker, with twelve
+  health alerts (host or a service down, a stalled service, stale metrics, scans or blocklist, a
+  filling disk, alerts not reaching Telegram) and two dashboards. It is built from a tag like the
+  Netwatch host is. See [docs/monitoring.md](docs/monitoring.md).
+
+For notifications (opt-in: a bot token in its own root-only file and `NETWATCH_TELEGRAM_CHAT_ID`;
+set up in [docs/alerting.md](docs/alerting.md)):
+
+- **`netwatch-notify`** sends every new alert to a private Telegram chat within about ten
+  seconds: critical ones (`ssh-login-after-failures`) with sound, warnings silently.
+- **No floods, no replays.** Alerts from before notifications were switched on are never sent;
+  a repeat of the same alert within 30 minutes is held back; more than ten at once arrive as one
+  summary. An alert counts as sent only once Telegram accepted it, so alerts raised while the
+  internet is down go out when it is back.
+- **restart** (warning): on start, a heartbeat older than the host's boot means the host was
+  down; the message says from when to when.
+- **Health alerts** go through Alertmanager on the monitoring host, with the same bot: grouped,
+  repeated while they fire, and with a "resolved" message.
+- `netwatch notify test` sends a message through the running service, and every `install.sh`
+  run sends one saying what was installed.
 
 ## Quick start (development)
 
@@ -198,12 +217,16 @@ commit:
 ```
 git clone https://github.com/iMovingTarget/netwatch.git && cd netwatch
 sudo deploy/check-host.sh > check.txt 2>&1   # optional: read-only report of the host
-sudo deploy/install.sh v0.5.0                # first install: creates /etc/netwatch/netwatch.env
+sudo deploy/install.sh v0.6.0                # first install: creates /etc/netwatch/netwatch.env
 sudoedit /etc/netwatch/netwatch.env          # set NETWATCH_DNS_LISTEN, NETWATCH_DNS_ALLOW_FROM,
-                                             # NETWATCH_DISCOVERY_INTERFACE and, for Phase 4,
+                                             # NETWATCH_DISCOVERY_INTERFACE, for Phase 4
                                              # NETWATCH_METRICS_LISTEN / NETWATCH_METRICS_ALLOW_FROM
-sudo deploy/install.sh v0.5.0                # again, now with DNS, discovery and metrics
+                                             # and, for Phase 5, NETWATCH_TELEGRAM_CHAT_ID
+sudo deploy/install.sh v0.6.0                # again, now with DNS, discovery, metrics, Telegram
 ```
+
+Telegram needs a bot token in `/etc/netwatch/telegram-bot-token` first; `install.sh` helps find
+the chat ID. The steps are in [docs/alerting.md](docs/alerting.md).
 
 The upgrade on the VM to the v0.5.0 release candidate, with DNS, discovery and metrics configured
 (LAN addresses replaced with documentation ones):
@@ -236,7 +259,8 @@ to an older version or remove Netwatch. Installing an older ref is the version r
 |---|---|
 | `/opt/netwatch/releases/<commit>/` | One virtualenv per installed commit, owned by root |
 | `/opt/netwatch/current` | Symlink to the active release |
-| `/etc/netwatch/netwatch.env` | Settings (and, later, secrets). `root:netwatch`, mode 0640 |
+| `/etc/netwatch/netwatch.env` | Settings, no secrets. `root:netwatch`, mode 0640 |
+| `/etc/netwatch/telegram-bot-token` | The Telegram bot token. `root:root`, mode 0600; netwatch-notify gets it through `LoadCredential=` |
 | `/etc/netwatch/allowlist.txt` | Names never to block |
 | `/var/lib/netwatch/` | The SQLite database (DNS queries, SSH logins, devices, alerts) |
 | `/var/lib/netwatch-blocklist/` | The blocklist dnsmasq reads (world-readable) |
@@ -260,6 +284,8 @@ netwatch devices [--unknown]           # the inventory; --unknown: new since the
 netwatch devices label MAC NAME        # name a device; it is then known
 netwatch alerts [-n 20]
 netwatch metrics [--output FILE]       # Prometheus metrics (the netwatch-metrics timer writes them)
+netwatch notify status                 # what was sent, held back, summarised; what still waits
+netwatch notify test [--message TEXT]  # a message through the running netwatch-notify
 sudo systemctl start netwatch-discovery.service   # scan now instead of within five minutes
 journalctl -u 'netwatch*' -u dnsmasq
 ```
@@ -284,6 +310,9 @@ journalctl -u 'netwatch*' -u dnsmasq
 
  netwatch-metrics.timer (every minute) -> netwatch metrics (read-only DB, no network):
      database -> Prometheus text file -> node_exporter (LAN address) <--scrape-- Prometheus -> Grafana
+                                                                                  |
+ netwatch-notify (every 10 s): alerts not yet sent -> Telegram Bot API     Alertmanager -> Telegram
+     (cooldown, burst summary, restart alerts; token via LoadCredential)   (health alerts)
 ```
 
 | Module | Role |
@@ -308,10 +337,12 @@ journalctl -u 'netwatch*' -u dnsmasq
 | `netwatch/dnsprobe.py` | Minimal DNS client for `netwatch dns check` |
 | `netwatch/report.py` | The terminal tables; text from outside (usernames) is escaped |
 | `netwatch/metrics.py` | Reads the database (read-only) and renders Prometheus metrics for `netwatch metrics` |
+| `netwatch/notify.py` | The `netwatch-notify` service: baseline, cooldown, burst summaries, retries, restart alerts, `notify test` |
+| `netwatch/telegram.py` | Minimal Telegram Bot API client over HTTPS (standard library); keeps the token out of errors |
 | `netwatch/storage.py` | SQLite in WAL mode, write transactions, schema versioning |
 | `netwatch/logsetup.py` | Logging to stderr, with journald priorities when stderr is the journal |
 | `deploy/` | Install, uninstall and host-check scripts, systemd units, example config |
-| `monitoring/` | Prometheus and Grafana for a separate host: Compose, scrape config, alert rules and tests, provisioned dashboards, `setup.sh` |
+| `monitoring/` | Prometheus, Alertmanager and Grafana for a separate host: Compose, scrape config, alert rules and tests, Alertmanager routes and message template, provisioned dashboards, `setup.sh` |
 
 Design decisions and their trade-offs:
 
@@ -374,9 +405,10 @@ Design decisions and their trade-offs:
   device is seen there, so "which device was 192.0.2.50 at 14:00" has an answer and a range
   extender answering for two addresses doesn't add a row per scan.
 - **One package, one systemd unit per component.** Each service gets only what it needs: the
-  loggers read the journal (`systemd-journal` group) with no network; the updater has the network
-  but nothing else; the scanner sends ARP frames and nothing else. `systemd-analyze security`
-  rates them 0.6, 0.6, 1.1 and 1.4; CI fails above 2.0.
+  loggers read the journal (`systemd-journal` group) with no network; the updater and the notifier
+  have the network but nothing else; the scanner sends ARP frames and nothing else; the metrics
+  writer has neither. `systemd-analyze security` rates them 0.6 (dns, auth), 1.1 (blocklist,
+  notify), 1.4 (discovery) and 0.4 (metrics); CI fails above 2.0.
 - **Atomic, commit-pinned deploys.** Every install builds a virtualenv for one commit and only
   then switches the `current` symlink with `rename(2)`; installing an older ref is the rollback.
 - **SQLite in WAL mode.** One host and a low write rate don't justify a database server. WAL lets
@@ -388,6 +420,30 @@ Design decisions and their trade-offs:
   counter never drops (Prometheus reads a drop as a restart). Domain names, addresses and MAC
   addresses are never labels: each distinct value is a separate series, and those are unbounded.
   A per-minute heartbeat from each journal follower tells a stuck ingester from a quiet network.
+- **Two senders, one bot.** Netwatch's own alerts are events in its database; health alerts are
+  Prometheus rules that fire and resolve. Each goes through the tool built for it: netwatch-notify
+  reads the alerts table, Alertmanager adds grouping, repeats and "resolved" messages. Sending
+  everything through one of them would mean either turning security events into metrics (with
+  addresses as labels, which is unbounded) or opening a way from the Netwatch host into
+  Prometheus. The two paths watch each other where they can: a stalled notifier or an alert
+  stuck for ten minutes fires a health alert through Alertmanager.
+- **At least once, through the database.** An alert is marked as sent only after Telegram
+  accepted it, in its own transaction, so an outage delays alerts instead of losing them; the
+  price is that a crash at exactly the wrong moment sends one message twice. `netwatch notify
+  test` queues a test alert and waits for the service to send it, so the test covers the real
+  path (service, token, sandbox, network) rather than a second one.
+- **A baseline, a cooldown and a burst limit.** Switching notifications on doesn't replay old
+  alerts, a repeat of one alert within 30 minutes is held back, and more than ten waiting alerts
+  become one summary. The detectors already raise one alert per incident; these stop a detector
+  bug, or a backlog after an outage, from turning into a flood on the phone.
+- **The token is a credential, not a setting.** It lives in a root-only file that systemd hands
+  to netwatch-notify alone (`LoadCredential=`), not in `netwatch.env`, which every Netwatch
+  service can read, and not in an environment variable, which child processes inherit. The
+  client never puts it in an error message, and CI checks the journal for it.
+- **A restart notice instead of an outside watchdog.** Both VMs run on one desktop PC, so when
+  it is down nothing can alert. A dead man's switch (an outside service that alerts when pings
+  stop) would report an outage while it lasts, but means an account with another service; the
+  `restart` alert reports it afterwards, with when it started and ended.
 
 ## Limitations
 
@@ -422,9 +478,16 @@ Design decisions and their trade-offs:
   behind it share one entry.
 - **Only "new MAC address" is detected.** Two devices answering for one address (an address
   conflict, or ARP spoofing) are both recorded, but nothing alerts on it.
-- **Alerts aren't sent anywhere yet**; the health alerts fire in Prometheus and show in Grafana,
-  and Netwatch's own alerts are in `netwatch alerts`, but nothing is pushed to a phone until
-  Telegram in Phase 5.
+- **Nothing can alert while the PC is down.** Both VMs run on one desktop PC; the `restart`
+  alert arrives once it is back, not during the outage.
+- **Telegram is a dependency.** While Telegram or the internet can't be reached, alerts wait
+  (and arrive late, with the time they were raised). Both senders share one bot token, so a
+  revoked token silences both, and only Alertmanager's own page and Grafana still show health
+  alerts then. Messages contain LAN addresses, MAC addresses and SSH usernames and pass through
+  Telegram's servers; bot chats are not end-to-end encrypted.
+- **Delivery is at least once and polled every 10 seconds.** A crash between Telegram's answer
+  and the database commit sends one message twice; an alert takes up to about ten seconds to
+  leave the host.
 - **The monitoring host is a second machine to keep running.** If it is down, nothing is recorded
   while it is off and no alert can fire; Netwatch keeps working regardless, since it only writes a
   file. Prometheus keeps 30 days or 5 GB, whichever comes first.
@@ -451,14 +514,17 @@ shellcheck deploy/*.sh deploy/bin/netwatch monitoring/setup.sh
 If dnsmasq is installed, the tests also start the real resolver with the generated configuration.
 CI runs ruff, pytest on Python 3.12 to 3.14 on Linux (with dnsmasq) and 3.14 on Windows, a
 monitoring job (promtool checks the Prometheus config, the alert rules and their unit tests, and
-the metrics output), and a deploy job on a real systemd host: install with DNS, discovery and
-metrics; query through dnsmasq and check the queries are stored (including across a restart of the
-logger); fail six SSH logins against the runner's sshd and check each is stored once with one
-alert; scan a test LAN (a bridge with devices in network namespaces) and check the baseline and
-exactly one alert for a device that joins later; check node_exporter serves Netwatch's metrics on
-the listen address only; bring up the monitoring stack and confirm Prometheus scrapes the host and
-Grafana serves the dashboards; then install a release without discovery and go forward again,
-reinstall, and uninstall `--purge`.
+the metrics output; amtool checks both Alertmanager configurations and renders the message
+template), and a deploy job on a real systemd host: install with DNS, discovery, metrics and
+Telegram (against a fake Telegram API on loopback); query through dnsmasq and check the queries
+are stored (including across a restart of the logger); fail six SSH logins against the runner's
+sshd and check each is stored once with one alert; scan a test LAN (a bridge with devices in
+network namespaces) and check the baseline and exactly one alert for a device that joins later;
+check each alert reached the fake Telegram exactly once, warnings silently, and that the bot
+token is in no log line; check node_exporter serves Netwatch's metrics on the listen address
+only; bring up the monitoring stack and confirm Prometheus scrapes the host and finds
+Alertmanager, and Grafana serves the dashboards; then install a release without discovery and go
+forward again, reinstall, and uninstall `--purge`.
 
 AI-assisted implementation; architecture, operations and verification are human-owned.
 
