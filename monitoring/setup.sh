@@ -50,17 +50,22 @@ wait_for() {
 cd "$here"
 
 # --test-alert: one alert through Alertmanager to Telegram, on the running stack. It resolves by
-# itself two minutes later, so a "resolved" message follows within about five more. The run label
-# makes each test a new alert: Alertmanager doesn't repeat a message about an identical alert
-# within repeat_interval (4 h), so a second test would otherwise send nothing. Annotation values
-# are double-quoted inside the argument, as amtool's label parser expects; stdin is closed so
-# `docker compose exec` can't swallow the rest of a script that pipes commands into bash.
+# itself two minutes later, so a "resolved" message follows within about five more.
+# - The run label makes each test a new alert: Alertmanager doesn't repeat a message about an
+#   identical alert within repeat_interval (4 h), so a second test would otherwise send nothing.
+# - --start is explicit: given only an end, Alertmanager takes the end as the start too, and the
+#   message would say "Since" two minutes in the future.
+# - The text doesn't name this script: Telegram turns "setup.sh" into a link (.sh is a domain).
+# - Annotation values are double-quoted inside the argument, as amtool's label parser expects, and
+#   stdin is closed so `docker compose exec` can't swallow the rest of a script piped into bash.
 if [ "${1:-}" = --test-alert ]; then
+    now=$(date -u +%s)
     docker compose exec -T alertmanager amtool --alertmanager.url=http://127.0.0.1:9093 \
-        alert add NetwatchTestAlert severity=critical run="$(date -u +%Y%m%dT%H%M%SZ)" \
-        --annotation='summary="Test alert from setup.sh --test-alert"' \
+        alert add NetwatchTestAlert severity=critical run="$(date -u -d "@$now" +%Y%m%dT%H%M%SZ)" \
+        --annotation='summary="Test alert from the monitoring host"' \
         --annotation='description="Health alerts reach Telegram through Alertmanager."' \
-        --end="$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)" </dev/null ||
+        --start="$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)" \
+        --end="$(date -u -d "@$((now + 120))" +%Y-%m-%dT%H:%M:%SZ)" </dev/null ||
         die "could not add the test alert (is the stack running? docker compose ps)"
     log "test alert added: Telegram should show it within a minute, and RESOLVED a few after"
     exit 0

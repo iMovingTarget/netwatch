@@ -184,3 +184,16 @@ def test_each_test_alert_is_a_new_alert() -> None:
     setup = (MONITORING / "setup.sh").read_text()
     add = next(line for line in setup.splitlines() if "alert add NetwatchTestAlert" in line)
     assert 'run="$(date' in add
+
+
+def test_the_test_alert_has_a_start_and_no_link_in_its_text() -> None:
+    # Regression, from the first live run on 2 November: amtool sent no start time, so
+    # Alertmanager used the end time and the message said "Since 20:16" at 20:14 (and "From 20:22
+    # to 20:22" when resolved); and Telegram rendered "setup.sh" in the text as a web link.
+    setup = (MONITORING / "setup.sh").read_text()
+    start = setup.index("--test-alert ]")
+    block = setup[start : setup.index("exit 0", start)]
+    assert "--start=" in block and "--end=" in block
+    texts = re.findall(r"--annotation='[a-z]+=\"([^\"]+)\"'", block)
+    assert len(texts) == 2
+    assert not any(re.search(r"\b[\w-]+\.(sh|py|md|io|ai)\b", text) for text in texts), texts
