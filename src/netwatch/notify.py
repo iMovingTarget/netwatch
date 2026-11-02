@@ -164,10 +164,11 @@ def format_summary(
 
 
 def restart_message(boot_us: int, beat_us: int, now_us: int, tz: tzinfo | None = None) -> str:
+    seconds = (boot_us - beat_us) / 1e6
+    down = "under a minute" if seconds < 60 else f"about {_duration(seconds)}"
     return (
         f"The host restarted: last heartbeat {_clock(beat_us, now_us, tz)}, booted"
-        f" {_clock(boot_us, now_us, tz)}, down for about {_duration((boot_us - beat_us) / 1e6)}."
-        " Nothing on it could alert in between."
+        f" {_clock(boot_us, now_us, tz)}, down for {down}. Nothing on it could alert in between."
     )
 
 

@@ -318,6 +318,16 @@ def test_a_reboot_since_the_last_heartbeat_raises_a_restart_alert(
     assert "WARNING: restart" in tg.texts[0]
 
 
+def test_a_quick_reboot_says_under_a_minute() -> None:
+    # Regression: a reboot of the VM on 2 Nov (heartbeat 20:16:06, booted 20:16:19) produced
+    # "down for about under a minute".
+    beat = T0
+    message = notify.restart_message(beat + 13_000_000, beat, beat + 60_000_000, UTC)
+    assert "down for under a minute." in message
+    assert "about under" not in message
+    assert "down for about 1 min." in notify.restart_message(beat + 75_000_000, beat, beat, UTC)
+
+
 def test_restarting_only_the_service_raises_nothing(
     conn: sqlite3.Connection, tg: FakeTelegram, clock: Clock
 ) -> None:
