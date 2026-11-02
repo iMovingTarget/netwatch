@@ -58,10 +58,10 @@ You need Telegram on your phone. The bot is free and belongs to your Telegram ac
    a conversation itself, so until you do, Telegram refuses its messages to you.
 3. **Give the Netwatch host the token.** It goes in a file only root can read, not in
    `netwatch.env`. Run this, paste the token, press Enter, then Ctrl+D (the token stays out of
-   the shell history and the process list):
+   the shell history and the process list; `install.sh` sets the owner and mode again anyway):
 
    ```
-   sudo install -m 0600 -o root -g root /dev/stdin /etc/netwatch/telegram-bot-token
+   sudo sh -c 'umask 077; cat > /etc/netwatch/telegram-bot-token'
    ```
 
 4. **Find your chat ID.** Run `install.sh` with the release you already have (or v0.6.0). With a
@@ -92,16 +92,17 @@ You need Telegram on your phone. The bot is free and belongs to your Telegram ac
 6. **Give the monitoring host the same token and chat.** On the monitoring host:
 
    ```
-   sudo install -D -m 0400 /dev/stdin /opt/netwatch-monitoring/monitoring/secrets/telegram/bot_token
+   sudo sh -c 'umask 077; d=/opt/netwatch-monitoring/monitoring/secrets/telegram; mkdir -p $d && cat > $d/bot_token'
    sudoedit /opt/netwatch-monitoring/monitoring/.env          # TELEGRAM_CHAT_ID=123456789
    sudo /opt/netwatch-monitoring/monitoring/setup.sh
    sudo /opt/netwatch-monitoring/monitoring/setup.sh --test-alert
    ```
 
-   `setup.sh` gives the token file to Alertmanager's user (read-only), writes the chat ID next to
-   it and switches Alertmanager from `off.yml` to `telegram.yml`. `--test-alert` adds a critical
-   test alert to the running Alertmanager. It arrives within about 30 seconds, and a "RESOLVED"
-   message follows a few minutes after it expires (two minutes).
+   The first command reads the token like step 3. `setup.sh` gives the token file to Alertmanager's
+   user (read-only), writes the chat ID next to it and switches Alertmanager from `off.yml` to
+   `telegram.yml`. `--test-alert` adds a critical test alert to the running Alertmanager. It arrives
+   within about 30 seconds, and a "RESOLVED" message follows a few minutes after it expires (two
+   minutes).
 
 ## How netwatch-notify decides what to send
 
