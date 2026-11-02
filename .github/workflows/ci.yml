@@ -180,8 +180,11 @@ jobs:
                 -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null "nwtest$i@127.0.0.1" true || true
           done
+          # Wait for all six, not for the alert: the alert is raised at the fifth, and stopping
+          # then raced the sixth into the database (CI run 41518108821 counted 5).
+          stored() { netwatch auth recent --failed -n 50 | grep -c '^[0-9-]* [0-9:]*  127\.0\.0\.1 '; }
           for _ in $(seq 20); do
-            if netwatch alerts | grep -q ssh-brute-force; then break; fi
+            if [ "$(stored)" -ge 6 ]; then break; fi
             sleep 1
           done
           netwatch auth recent --failed -n 50 | tee failed.txt
