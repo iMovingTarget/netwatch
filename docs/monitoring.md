@@ -162,6 +162,16 @@ about it still arrives, through Alertmanager.
 NetwatchIngestStalled of v0.5.0 is called NetwatchServiceStalled from v0.6.0 on, since it now
 covers netwatch-notify too.
 
+## The first real alert
+
+The first real alert came from the VM's own monitoring. On 31 October the host PC crashed and
+rebooted; the Netwatch VM came back, but node_exporter had started a few seconds before DHCP gave
+the VM its address, failed to bind it and gave up, so Prometheus fired NetwatchDown. That alert
+is how the bug was found; it was fixed (and the fix proven with a reboot) before v0.5.0 was
+tagged:
+
+![Prometheus alerts page: the eleven Netwatch health rules, NetwatchDown firing](prometheus-first-alert.png)
+
 ## Dashboards
 
 `monitoring/grafana/dashboards/*.json`, provisioned read-only: a change is made in the
