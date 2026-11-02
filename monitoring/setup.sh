@@ -50,13 +50,15 @@ wait_for() {
 cd "$here"
 
 # --test-alert: one alert through Alertmanager to Telegram, on the running stack. It resolves by
-# itself two minutes later, so a "resolved" message follows within about five more.
+# itself two minutes later, so a "resolved" message follows within about five more. Annotation
+# values are double-quoted inside the argument, as amtool's label parser expects; stdin is closed
+# so `docker compose exec` can't swallow the rest of a script that pipes commands into bash.
 if [ "${1:-}" = --test-alert ]; then
     docker compose exec -T alertmanager amtool --alertmanager.url=http://127.0.0.1:9093 \
         alert add NetwatchTestAlert severity=critical \
-        --annotation=summary="Test alert from setup.sh --test-alert" \
-        --annotation=description="Health alerts reach Telegram through Alertmanager." \
-        --end="$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)" ||
+        --annotation='summary="Test alert from setup.sh --test-alert"' \
+        --annotation='description="Health alerts reach Telegram through Alertmanager."' \
+        --end="$(date -u -d '+2 min' +%Y-%m-%dT%H:%M:%SZ)" </dev/null ||
         die "could not add the test alert (is the stack running? docker compose ps)"
     log "test alert added: Telegram should show it within a minute, and RESOLVED a few after"
     exit 0

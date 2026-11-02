@@ -160,3 +160,18 @@ def test_the_template_alertmanager_uses_is_defined() -> None:
 def test_alertmanager_without_telegram_sends_nowhere() -> None:
     assert list(_receivers("off.yml")) == ["nowhere"]
     assert _receivers("off.yml")["nowhere"] == {"name": "nowhere"}
+
+
+def test_the_test_alert_command_quotes_annotations_and_closes_stdin() -> None:
+    # Regression, both found on the monitoring VM on 2 November: amtool 0.34 warned that
+    # summary=Test alert ... "is incompatible" with its label parser and fell back to the old one
+    # (values with spaces must be double-quoted), and `docker compose exec` read the rest of the
+    # commands piped into `bash -s` after setup.sh --test-alert, so they never ran.
+    setup = (MONITORING / "setup.sh").read_text()
+    start = setup.index("--test-alert ]")
+    block = setup[start : setup.index("exit 0", start)]
+    annotations = re.findall(r"--annotation=(\S.*?) \\\n", block)
+    assert len(annotations) == 2
+    for value in annotations:
+        assert re.fullmatch(r"'[a-z]+=\"[^\"]+\"'", value), value
+    assert "</dev/null" in block
