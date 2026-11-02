@@ -66,10 +66,10 @@ tests:
                 minute. Check systemctl status netwatch-metrics.timer and journalctl -u
                 netwatch-metrics. Every Netwatch number in Grafana is frozen until it is fixed.
       - eval_time: 10m
-        alertname: NetwatchIngestStalled
+        alertname: NetwatchServiceStalled
         exp_alerts: []
 
-  - name: a follower without a heartbeat is stalled, the busy one next to it is not
+  - name: a service without a heartbeat is stalled, the busy one next to it is not
     interval: 1m
     input_series:
       - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
@@ -80,17 +80,53 @@ tests:
         values: "0+60x20"
     alert_rule_test:
       - eval_time: 12m
-        alertname: NetwatchIngestStalled
+        alertname: NetwatchServiceStalled
         exp_alerts: []
       - eval_time: 15m
-        alertname: NetwatchIngestStalled
+        alertname: NetwatchServiceStalled
         exp_alerts:
           - exp_labels: {severity: critical, job: netwatch, instance: netwatch, component: dns}
             exp_annotations:
-              summary: Netwatch's dns follower has stopped
+              summary: netwatch-dns has stopped working
               description: >-
                 netwatch-dns has not recorded a heartbeat for 10m 0s; it sends one every minute,
                 busy or idle. The process is stuck or cannot write the database.
+
+  - name: an alert still waiting after 10 minutes means notifications are broken
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0+60x20"
+      # Raised at minute 2 and never sent.
+      - series: netwatch_alerts_oldest_unsent_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "_ _ 120x18"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NetwatchAlertsNotSent
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: NetwatchAlertsNotSent
+        exp_alerts:
+          - exp_labels: {severity: critical, job: netwatch, instance: netwatch}
+            exp_annotations:
+              summary: Netwatch's alerts are not reaching Telegram
+              description: >-
+                An alert raised 12m 0s ago is still waiting to be sent. netwatch-notify is down,
+                or Telegram refuses it (wrong token or chat) or cannot be reached. See netwatch
+                notify status and journalctl -u netwatch-notify.
+
+  - name: an alert that waits only briefly is not a broken notifier
+    interval: 1m
+    input_series:
+      - series: netwatch_metrics_generated_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "0+60x20"
+      # Telegram was unreachable for 8 minutes, then the alert went out and the series ended.
+      - series: netwatch_alerts_oldest_unsent_timestamp_seconds{job="netwatch", instance="netwatch"}
+        values: "_ _ 120x7 stale"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: NetwatchAlertsNotSent
+        exp_alerts: []
 
   - name: long-running services must be active; oneshots between runs are not alerts
     interval: 1m

@@ -79,6 +79,14 @@ fires, correctly. Remove the stale file (`sudo rm /var/lib/netwatch-metrics/netw
 silence it, or run `uninstall.sh`, which stops node_exporter and removes it. See
 [monitoring.md](monitoring.md).
 
+**Notifications across a downgrade to before v0.6.0.** v0.6.0 keeps database schema 4, so going
+back to v0.5.0 needs nothing done to the database. v0.5.0 has no `netwatch-notify` unit, so
+`install.sh` stops and removes it; nothing is sent to Telegram any more, and the token file
+(`/etc/netwatch/telegram-bot-token`) stays. The `restart` and `test` alerts it stored stay in
+`netwatch alerts`. Going forward again resumes where it left off: alerts raised in between are
+sent then (as one summary message if more than ten are waiting). On the monitoring host, see
+[monitoring.md](monitoring.md#rolling-back).
+
 ## 4. Remove Netwatch from the host
 
 ```

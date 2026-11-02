@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
-from netwatch import __version__
+from netwatch import __version__, notify, storage
 from netwatch.__main__ import main
 
 
@@ -47,3 +48,34 @@ def test_unknown_command_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as exc:
         main(["frobnicate"], environ={})
     assert exc.value.code == 2
+
+
+def test_notify_commands_need_a_chat_id(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    assert main(["notify", "test"], environ={"NETWATCH_STATE_DIR": str(tmp_path)}) == 2
+    assert "NETWATCH_TELEGRAM_CHAT_ID" in capsys.readouterr().err
+
+
+def test_notify_chats_without_a_token_says_where_it_looked(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    env = {"NETWATCH_TELEGRAM_TOKEN_FILE": str(tmp_path / "token")}
+    assert main(["notify", "chats"], environ=env) == 2
+    err = capsys.readouterr().err
+    assert f"no Telegram bot token at {tmp_path / 'token'}" in err
+    assert "Traceback" not in err
+
+
+def test_notify_status_before_and_after_the_first_start(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    env = {"NETWATCH_STATE_DIR": str(tmp_path), "NETWATCH_TELEGRAM_CHAT_ID": "42"}
+    storage.connect(tmp_path / "netwatch.db").close()
+    assert main(["notify", "status"], environ=env) == 0
+    assert "netwatch-notify has not run yet" in capsys.readouterr().out
+    with closing(storage.connect(tmp_path / "netwatch.db")) as conn:
+        storage.set_meta(conn, notify.BASELINE_KEY, "1793000000000000")
+    assert main(["notify", "status"], environ=env) == 0
+    out = capsys.readouterr().out
+    assert "notifications:  on, chat 42" in out
+    assert "alerts:         0 sent, 0 suppressed, 0 summarised" in out
+    assert "waiting:        0" in out

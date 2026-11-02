@@ -33,6 +33,13 @@ DEFAULT_AUTH_WINDOW_MINUTES = 10
 DEFAULT_AUTH_RETENTION_DAYS = 90
 DEFAULT_DISCOVERY_RETENTION_DAYS = 90
 DEFAULT_OUI_DIR = "/usr/share/ieee-data"
+DEFAULT_TELEGRAM_API_URL = "https://api.telegram.org"
+DEFAULT_TELEGRAM_TOKEN_FILE = "/etc/netwatch/telegram-bot-token"
+DEFAULT_NOTIFY_COOLDOWN_MINUTES = 30
+# A Telegram chat ID: a user's (positive) or a group's (negative) number.
+_CHAT_ID = re.compile(r"-?[0-9]{1,20}")
+# Plain http is accepted only for a fake API on this host (tests and CI), never over the network.
+_LOOPBACK_URL = re.compile(r"http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?")
 # Linux interface names: at most 15 characters, no slashes or whitespace.
 _INTERFACE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,14}")
 
@@ -58,6 +65,10 @@ class Settings:
     discovery_interface: str | None  # interface whose subnet is scanned; None means off
     discovery_retention_days: int  # address history and new-device alerts
     oui_dir: Path  # the IEEE MAC address registry (package ieee-data)
+    telegram_chat_id: int | None  # where alerts are sent; None means notifications are off
+    telegram_api_url: str
+    telegram_token_file: Path  # read when not running under systemd's LoadCredential=
+    notify_cooldown_minutes: int  # repeats of one alert kind for one subject within this are held
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
@@ -93,6 +104,17 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             environ, "NETWATCH_DISCOVERY_RETENTION_DAYS", DEFAULT_DISCOVERY_RETENTION_DAYS
         ),
         oui_dir=Path(environ.get("NETWATCH_OUI_DIR", "").strip() or DEFAULT_OUI_DIR),
+        telegram_chat_id=_chat_id(environ, "NETWATCH_TELEGRAM_CHAT_ID"),
+        telegram_api_url=_api_url(environ, "NETWATCH_TELEGRAM_API_URL"),
+        telegram_token_file=Path(
+            environ.get("NETWATCH_TELEGRAM_TOKEN_FILE", "").strip() or DEFAULT_TELEGRAM_TOKEN_FILE
+        ),
+        notify_cooldown_minutes=_positive_int(
+            environ,
+            "NETWATCH_NOTIFY_COOLDOWN_MINUTES",
+            DEFAULT_NOTIFY_COOLDOWN_MINUTES,
+            unit="minutes",
+        ),
     )
 
 
@@ -208,6 +230,22 @@ def _urls(environ: Mapping[str, str], key: str, default: tuple[str, ...]) -> tup
         if not item.startswith("https://"):
             raise ConfigError(f"{key}: {item!r} must be an https:// URL")
     return tuple(items) or default
+
+
+def _chat_id(environ: Mapping[str, str], key: str) -> int | None:
+    raw = environ.get(key, "").strip()
+    if not raw:
+        return None
+    if not _CHAT_ID.fullmatch(raw):
+        raise ConfigError(f"{key} must be a Telegram chat ID such as 123456789, not {raw!r}")
+    return int(raw)
+
+
+def _api_url(environ: Mapping[str, str], key: str) -> str:
+    url = environ.get(key, "").strip().rstrip("/") or DEFAULT_TELEGRAM_API_URL
+    if not (url.startswith("https://") or _LOOPBACK_URL.fullmatch(url)):
+        raise ConfigError(f"{key}: {url!r} must be an https:// URL")
+    return url
 
 
 def _positive_int(environ: Mapping[str, str], key: str, default: int, unit: str = "days") -> int:

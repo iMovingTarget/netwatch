@@ -1,0 +1,56 @@
+# Sends every new alert to Telegram (netwatch notify run). install.sh enables it only when
+# NETWATCH_TELEGRAM_CHAT_ID is set and the bot token is in /etc/netwatch/telegram-bot-token.
+[Unit]
+Description=Netwatch Telegram notifier
+Documentation=https://github.com/iMovingTarget/netwatch
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=netwatch
+Group=netwatch
+EnvironmentFile=/etc/netwatch/netwatch.env
+EnvironmentFile=/opt/netwatch/current/revision.env
+# The bot token, from a file only root can read. systemd copies it into a private directory that
+# only this service sees ($CREDENTIALS_DIRECTORY). It is not in netwatch.env, which every Netwatch
+# service can read, and it is not an environment variable, which child processes would inherit.
+LoadCredential=telegram-bot-token:/etc/netwatch/telegram-bot-token
+ExecStart=/opt/netwatch/current/venv/bin/netwatch notify run
+Restart=on-failure
+RestartSec=10s
+StateDirectory=netwatch
+StateDirectoryMode=0750
+UMask=0027
+
+# Sandboxing. It reads and writes the database and talks HTTPS to Telegram; nothing else.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

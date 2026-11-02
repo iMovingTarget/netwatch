@@ -11,6 +11,8 @@ from netwatch.alerts import StoredAlert
 from netwatch.authlog import AuthEvent
 from netwatch.devicedb import Device
 from netwatch.dnslog import DnsQuery
+from netwatch.notify import Status
+from netwatch.telegram import Chat
 
 _STATUS_ORDER = ("forwarded", "cached", "blocked", "local", "no-answer")
 
@@ -143,3 +145,33 @@ def _escaped(text: str) -> str:
 def _ascii(text: str) -> str:
     # Console output may be redirected on Windows; non-ASCII would raise there.
     return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def notify_status(status: Status, tz: tzinfo | None = None) -> str:
+    """What netwatch-notify has done so far, from the database."""
+    if status.chat_id is None:
+        state = "off (NETWATCH_TELEGRAM_CHAT_ID is not set)"
+    elif status.baseline_us is None:
+        state = f"set up for chat {status.chat_id}, but netwatch-notify has not run yet"
+    else:
+        state = f"on, chat {status.chat_id}"
+    lines = [f"notifications:  {state}"]
+    if status.baseline_us is not None:
+        lines.append(f"since:          {_time(status.baseline_us, tz)} (older alerts are not sent)")
+    if status.heartbeat_us is not None:
+        lines.append(f"last heartbeat: {_time(status.heartbeat_us, tz)}")
+    done = ", ".join(f"{count} {result}" for result, count in status.counts.items())
+    lines.append(f"alerts:         {done}")
+    waiting = f"{status.unsent}"
+    if status.oldest_unsent_us is not None:
+        waiting += f" (oldest raised {_time(status.oldest_unsent_us, tz)})"
+    lines.append(f"waiting:        {waiting}")
+    lines.append(f"send errors:    {status.telegram_errors}")
+    return "\n".join(lines) + "\n"
+
+
+def chats_table(chats: Sequence[Chat]) -> str:
+    """Chats that messaged the bot. Names are chosen by Telegram users, so they are escaped."""
+    rows = [("CHAT ID", "TYPE", "NAME")]
+    rows += [(str(c.id), c.kind, _escaped(c.name)) for c in chats]
+    return _columns(rows)

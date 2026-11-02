@@ -6,6 +6,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-02
+
+### Added
+- Telegram notifications (Phase 5). `netwatch-notify.service` checks the alerts table every 10
+  seconds and sends each new alert to `NETWATCH_TELEGRAM_CHAT_ID` through a bot: critical alerts
+  with sound, warnings silently. It is off until the chat ID is set and the bot token is in
+  `/etc/netwatch/telegram-bot-token` (root only); systemd hands the token to the service alone
+  with `LoadCredential=`. Setup: `docs/alerting.md`.
+- Alerts raised before the notifier's first start are never sent. A repeat of an alert (same
+  kind and subject) within `NETWATCH_NOTIFY_COOLDOWN_MINUTES` (30) is held back, and more than
+  ten waiting alerts become one summary message. An alert is marked as sent (`notified_us`) only
+  after Telegram accepted it, so alerts raised while Telegram can't be reached are sent later;
+  failures are retried with a backoff, and Telegram's `retry_after` is honoured.
+- A `restart` alert (warning) when the notifier finds its last heartbeat older than the host's
+  boot: the host was down in between, and the message says from when to when.
+- Commands: `netwatch notify test [--message TEXT]` (a message through the running service),
+  `netwatch notify status`, and `netwatch notify chats` to find the chat ID. `install.sh` lists
+  the chats when only the token is set up, and sends a test message after every install.
+- Metrics: `netwatch_alerts_notified_total{result}`, `netwatch_telegram_errors_total`,
+  `netwatch_alerts_unsent`, `netwatch_alerts_oldest_unsent_timestamp_seconds`, and the
+  notifier's heartbeat.
+- Alertmanager 0.34 on the monitoring host sends the health alerts to Telegram with the same
+  bot: critical ones with sound and repeated every 4 hours, warnings silently and daily, with a
+  "resolved" message. Loopback only, read-only container; `setup.sh --test-alert` sends a test
+  alert. Without `TELEGRAM_CHAT_ID` in `.env` it runs with nowhere to send.
+- Health alert `NetwatchAlertsNotSent` (critical): an alert has waited over 10 minutes to be sent.
+- CI checks both Alertmanager configurations and renders the message template, and in the
+  deploy job runs the notifier against a fake Telegram API on loopback: every alert arrives once,
+  with the right sound, and the token is in no log line.
+
+### Changed
+- `NetwatchIngestStalled` is now `NetwatchServiceStalled`, and also covers netwatch-notify's
+  heartbeat while notifications are on.
+- The database schema stays at version 4, so going back to v0.5.0 needs no database steps.
+
 ## [0.5.0] - 2026-10-30
 
 ### Added
@@ -121,7 +156,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - CI: ruff, pytest on Python 3.12 to 3.14 (Linux) and 3.14 (Windows), shellcheck, a unit
   hardening threshold, and an install, run and uninstall on a real systemd host.
 
-[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/iMovingTarget/netwatch/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/iMovingTarget/netwatch/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/iMovingTarget/netwatch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/iMovingTarget/netwatch/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/iMovingTarget/netwatch/compare/v0.2.0...v0.3.0

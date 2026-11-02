@@ -51,7 +51,7 @@ jobs:
         run: netwatch --version
 
   monitoring:
-    name: monitoring (promtool, compose, metrics format)
+    name: monitoring (promtool, amtool, compose, metrics format)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -64,6 +64,8 @@ jobs:
           docker compose -f monitoring/compose.yaml config --quiet
           image=$(docker compose -f monitoring/compose.yaml config --images | grep prometheus)
           echo "PROMETHEUS_IMAGE=$image" >> "$GITHUB_ENV"
+          image=$(docker compose -f monitoring/compose.yaml config --images | grep alertmanager)
+          echo "ALERTMANAGER_IMAGE=$image" >> "$GITHUB_ENV"
       - name: Prometheus configuration and alert rules are valid
         run: |
           promtool() { docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
@@ -74,6 +76,18 @@ jobs:
         run: |
           docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
             --entrypoint promtool "$PROMETHEUS_IMAGE" test rules /etc/prometheus/tests/netwatch.test.yml
+      - name: Both Alertmanager configurations are valid and the message template renders
+        run: |
+          mkdir -p "$RUNNER_TEMP/telegram"
+          printf '123456789:AAE-fake_token_for_ci_00000000000' > "$RUNNER_TEMP/telegram/bot_token"
+          printf '42' > "$RUNNER_TEMP/telegram/chat_id"
+          amtool() { docker run --rm -v "$PWD/monitoring/alertmanager:/etc/alertmanager:ro" \
+            -v "$RUNNER_TEMP/telegram:/run/secrets/telegram:ro" \
+            --entrypoint amtool "$ALERTMANAGER_IMAGE" "$@"; }
+          amtool check-config /etc/alertmanager/telegram.yml /etc/alertmanager/off.yml
+          amtool template render --template.glob='/etc/alertmanager/templates/*.tmpl' \
+            --template.text='{{ template "netwatch.telegram" . }}' | tee message.txt
+          grep -F 'Prometheus, monitoring host' message.txt
       - name: netwatch metrics output passes promtool's checks
         run: |
           pip install .
@@ -115,7 +129,14 @@ jobs:
           sudo install -d -m 0750 /etc/netwatch
           printf '%s\n' NETWATCH_DNS_LISTEN=192.0.2.53 NETWATCH_DNS_ALLOW_FROM=192.0.2.0/24 \
             NETWATCH_DISCOVERY_INTERFACE=nwbr0 NETWATCH_METRICS_LISTEN=192.0.2.53 \
-            NETWATCH_METRICS_ALLOW_FROM=192.0.2.0/24 | sudo tee /etc/netwatch/netwatch.env
+            NETWATCH_METRICS_ALLOW_FROM=192.0.2.0/24 NETWATCH_TELEGRAM_CHAT_ID=42 \
+            NETWATCH_TELEGRAM_API_URL=http://127.0.0.1:8081 | sudo tee /etc/netwatch/netwatch.env
+          # A fake Telegram API on loopback, and a token for it in the root-only file.
+          token="123456789:AAE-fake_token_for_ci_$(head -c 9 /dev/urandom | base64 | tr -d '/+=')"
+          printf '%s\n' "$token" | sudo tee /etc/netwatch/telegram-bot-token > /dev/null
+          echo "TELEGRAM_MESSAGES=$RUNNER_TEMP/telegram.jsonl" >> "$GITHUB_ENV"
+          nohup python3 .github/fake-telegram.py 8081 "$token" "$RUNNER_TEMP/telegram.jsonl" \
+            > "$RUNNER_TEMP/fake-telegram.log" 2>&1 &
       - name: Install this commit with install.sh
         run: sudo NETWATCH_REPO_URL="$GITHUB_WORKSPACE" deploy/install.sh ci-under-test
       - name: The CLI from a shell reports the deployed revision
@@ -127,7 +148,7 @@ jobs:
             sudo systemd-analyze verify "/etc/systemd/system/$(basename "$unit")"
           done
           systemctl is-active netwatch-dns.service netwatch-auth.service dnsmasq.service \
-            netwatch-blocklist.timer netwatch-discovery.timer
+            netwatch-blocklist.timer netwatch-discovery.timer netwatch-notify.service
           sudo ss -lnup | grep ':53 '
           if sudo ss -lnup | grep ':53 ' | grep dnsmasq | grep -v '192.0.2.53:53'; then
             echo "dnsmasq listens on more than the configured address"; exit 1
@@ -159,8 +180,11 @@ jobs:
                 -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=no \
                 -o UserKnownHostsFile=/dev/null "nwtest$i@127.0.0.1" true || true
           done
+          # Wait for all six, not for the alert: the alert is raised at the fifth, and stopping
+          # then raced the sixth into the database (CI run 41518108821 counted 5).
+          stored() { netwatch auth recent --failed -n 50 | grep -c '^[0-9-]* [0-9:]*  127\.0\.0\.1 '; }
           for _ in $(seq 20); do
-            if netwatch alerts | grep -q ssh-brute-force; then break; fi
+            if [ "$(stored)" -ge 6 ]; then break; fi
             sleep 1
           done
           netwatch auth recent --failed -n 50 | tee failed.txt
@@ -185,6 +209,49 @@ jobs:
           netwatch devices label 02:00:5e:00:53:63 'test phone'
           test "$(netwatch devices --unknown)" = "no unknown devices"
           journalctl -u netwatch-discovery.service --no-pager -o cat | tail -n 8
+      - name: Every alert reaches Telegram once; critical ones and tests with sound
+        run: |
+          set -x
+          # install.sh's test message went through the service, with the token from LoadCredential.
+          sudo stat -c '%U:%G %a' /etc/netwatch/telegram-bot-token | grep -Fx 'root:root 600'
+          # Alerts from the steps above: one brute force, one new device. Polls every 10 s.
+          for _ in $(seq 30); do
+            if [ "$(grep -c 'new-device' "$TELEGRAM_MESSAGES")" -ge 1 ]; then break; fi
+            sleep 1
+          done
+          netwatch notify test --message "CI: a test from the command line"
+          netwatch notify status | tee status.txt
+          grep -E '^waiting: +0$' status.txt
+          python3 - "$TELEGRAM_MESSAGES" <<'PY'
+          import json, sys
+          messages = [json.loads(line) for line in open(sys.argv[1])]
+          for m in messages:
+              print(m["disable_notification"], m["text"].replace("\n", " | "))
+          heads = [m["text"].splitlines()[0] for m in messages]
+          def sent(head):
+              return [m for m in messages if m["text"].splitlines()[0].endswith(head)]
+          assert all(m["chat_id"] == 42 for m in messages)
+          assert len([m for m in messages if "Installed netwatch" in m["text"]]) == 1, heads
+          assert len(sent("WARNING: ssh-brute-force")) == 1, heads
+          assert len(sent("WARNING: new-device")) == 1, heads
+          assert sent("WARNING: new-device")[0]["disable_notification"] is True
+          tests = sent("TEST")
+          assert len(tests) == 2 and not any(m["disable_notification"] for m in tests), heads
+          # No burst here, so nothing was folded into a summary.
+          assert not any("alerts at once" in head for head in heads), heads
+          PY
+          # The notifier's metrics: nothing waits, nothing failed.
+          sudo systemctl start netwatch-metrics.service
+          grep -E '^netwatch_alerts_unsent 0$' /var/lib/netwatch-metrics/netwatch.prom
+          grep -E '^netwatch_telegram_errors_total 0$' /var/lib/netwatch-metrics/netwatch.prom
+          grep -E '^netwatch_heartbeat_timestamp_seconds\{component="notify"\}' \
+            /var/lib/netwatch-metrics/netwatch.prom
+          journalctl -u netwatch-notify.service --no-pager -o cat | tail -n 8
+          # The token is in no log line.
+          token=$(sudo cat /etc/netwatch/telegram-bot-token)
+          if sudo journalctl -u 'netwatch*' --no-pager | grep -F "${token#*:}"; then
+            echo "the bot token is in the journal"; exit 1
+          fi
       - name: node_exporter serves Netwatch's metrics, on the listen address only
         run: |
           set -x
@@ -236,6 +303,14 @@ jobs:
           printf '%s\n' GRAFANA_LISTEN=127.0.0.1 NETWATCH_TARGET=192.0.2.53:9100 > monitoring/.env
           sudo monitoring/setup.sh | tee setup.txt
           grep -F "target netwatch: up" setup.txt
+          grep -F "target alertmanager: up" setup.txt
+          grep -F "health alerts are not sent anywhere" setup.txt
+          # Prometheus has found Alertmanager, which answers on loopback only.
+          curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers | grep -F 'alertmanager:9093'
+          curl -fsS http://127.0.0.1:9093/-/ready
+          if sudo ss -lntp | grep ':9093 ' | grep -v '127.0.0.1:9093'; then
+            echo "Alertmanager is published on more than loopback"; exit 1
+          fi
           query() { curl -fsS --get http://127.0.0.1:9090/api/v1/query --data-urlencode "query=$1"; }
           query 'netwatch_dns_queries_total{instance="netwatch", status="blocked"} > 0' | tee q.json
           grep -F '"status":"blocked"' q.json

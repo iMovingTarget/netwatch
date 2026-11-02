@@ -171,3 +171,40 @@ def test_discovery_settings() -> None:
 def test_discovery_interface_must_be_an_interface_name(name: str) -> None:
     with pytest.raises(ConfigError, match="NETWATCH_DISCOVERY_INTERFACE"):
         load_settings({"NETWATCH_DISCOVERY_INTERFACE": name})
+
+
+def test_notifications_are_off_by_default() -> None:
+    settings = load_settings({})
+    assert settings.telegram_chat_id is None
+    assert settings.telegram_api_url == "https://api.telegram.org"
+    assert settings.telegram_token_file == Path("/etc/netwatch/telegram-bot-token")
+    assert settings.notify_cooldown_minutes == 30
+
+
+def test_notification_settings() -> None:
+    settings = load_settings(
+        {
+            "NETWATCH_TELEGRAM_CHAT_ID": " -1001234567890 ",
+            "NETWATCH_TELEGRAM_API_URL": "http://127.0.0.1:8081/",
+            "NETWATCH_NOTIFY_COOLDOWN_MINUTES": "5",
+        }
+    )
+    assert settings.telegram_chat_id == -1001234567890
+    assert settings.telegram_api_url == "http://127.0.0.1:8081"
+    assert settings.notify_cooldown_minutes == 5
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("NETWATCH_TELEGRAM_CHAT_ID", "@sergei"),
+        ("NETWATCH_TELEGRAM_CHAT_ID", "12 34"),
+        # Plain http would send the bot token across the network unencrypted.
+        ("NETWATCH_TELEGRAM_API_URL", "http://api.telegram.org"),
+        ("NETWATCH_TELEGRAM_API_URL", "http://127.0.0.1.example.com"),
+        ("NETWATCH_NOTIFY_COOLDOWN_MINUTES", "0"),
+    ],
+)
+def test_invalid_notification_settings_are_config_errors(key: str, value: str) -> None:
+    with pytest.raises(ConfigError, match=key):
+        load_settings({key: value})
