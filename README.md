@@ -9,6 +9,15 @@ Server VM on a real home network.
 
 **Status: v0.6.0; all five phases are done.**
 
+![Telegram: the bot chat after the live test](docs/telegram-alerts.png)
+
+*The bot chat after the live test on 2 November (the admin PC's address and the account name are
+hidden). From the top: Alertmanager's test alert; the failed-login demo, a silent warning and then
+a critical alert, with sound, for the login that followed it; the notice after a reboot of the
+VM; the message every install sends; the test alert resolving. "Since 20:16" and "about under a
+minute" are two of the bugs this run found; all were fixed before the release
+([docs/alerting.md](docs/alerting.md#tested)).*
+
 ![Grafana: the Netwatch host dashboard over 24 hours](docs/grafana-netwatch-host.png)
 
 *The Netwatch host dashboard in Grafana on 31 October. The gaps are times the host PC was down (a

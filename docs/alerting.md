@@ -42,7 +42,7 @@ A security alert looks like this (documentation addresses):
 
 ```
 🔴 CRITICAL: ssh-login-after-failures
-successful SSH login as 'sun' from 192.0.2.10 after a brute-force alert for it within 10 minutes
+successful SSH login as 'alice' from 192.0.2.10 after a brute-force alert for it within 10 minutes
 netwatch, 10:59:55 GMT
 ```
 
@@ -102,7 +102,9 @@ You need Telegram on your phone. The bot is free and belongs to your Telegram ac
    user (read-only), writes the chat ID next to it and switches Alertmanager from `off.yml` to
    `telegram.yml`. `--test-alert` adds a critical test alert to the running Alertmanager. It arrives
    within about 30 seconds, and a "RESOLVED" message follows a few minutes after it expires (two
-   minutes).
+   minutes). The test alert exists only in Alertmanager's memory, so running `setup.sh` again before
+   it has resolved drops it and no "resolved" follows; Prometheus's own alerts are sent again by
+   Prometheus and aren't affected.
 
 ## How netwatch-notify decides what to send
 
@@ -200,3 +202,36 @@ a revoked token, which breaks both senders at once since they share it.
 
 If notifications are turned on again later, the baseline from the first start still applies:
 alerts raised while they were off are sent then.
+
+## Tested
+
+2026-11-02, the v0.6.0 release candidate on both VMs with a real bot and a phone:
+
+- **Baseline.** netwatch-notify's first start logged "the 9 alerts raised before now will not be
+  sent": the failed-login and new-device alerts from the Phase 2 and 3 demos. None arrived.
+- **Install message.** `install.sh` sent its test message through the service; Telegram accepted
+  it 3 seconds after it was queued.
+- **Failed-login demo.** Six failed SSH logins from the admin PC (unknown users, no keys): the
+  ssh-brute-force warning arrived silently. The next key login from the same PC raised
+  ssh-login-after-failures, which arrived with sound.
+- **Restart.** A reboot of the Netwatch VM: after boot the notifier found its last heartbeat
+  (20:16:06) older than the boot (20:16:19) and the restart alert arrived.
+- **Health alerts.** `setup.sh --test-alert` arrived through Alertmanager, and its "resolved"
+  message followed at the next group flush. Alertmanager counted the Telegram notifications and
+  no failures.
+- **Afterwards:** `netwatch notify status` showed every alert sent, none suppressed or
+  summarised, none waiting and no send errors.
+
+The run found five problems, each fixed with a test before the release:
+
+- Writing the token with `install /dev/stdin` fails on Ubuntu 26.04 when the file already exists
+  (its uutils coreutils), so the recipes above use `sh -c 'umask 077; cat > ...'`.
+- A reboot shorter than a minute read "down for about under a minute".
+- `setup.sh`: amtool's new label parser warned about the test alert's unquoted annotations, and
+  `docker compose exec` and `run` swallowed the rest of a script piped into bash, so the commands
+  after `setup.sh` silently never ran.
+- A second `--test-alert` within 4 hours sent no firing message: Alertmanager doesn't repeat an
+  identical alert, so each test now carries a run label.
+- The test alert said "Since" its end time (amtool sends no start unless asked), and Telegram
+  turned "setup.sh" in its text into a web link (.sh is a top-level domain).
+
