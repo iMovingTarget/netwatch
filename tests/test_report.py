@@ -95,6 +95,25 @@ def test_usernames_cannot_send_terminal_escapes() -> None:
     assert line.isascii() and "\x1b" not in line
 
 
+def test_dns_names_and_answers_cannot_send_terminal_escapes(tmp_path: Path) -> None:
+    # Found in the v0.6.0 audit: usernames were escaped, DNS names (chosen by any client on the
+    # LAN) and answers (chosen by whoever runs the domain's DNS) were not. dnsmasq 2.92 logs a
+    # name it can't print as "<name unprintable>", but an imported log needn't come from it.
+    hostile = DnsQuery(
+        T0, 1, "192.0.2.10", "\x1b[2Jevilé.example", "TXT", "forwarded", "\x1b]0;x\x07", None
+    )
+    line = report.recent_table([hostile], tz=UTC).splitlines()[1]
+    assert line.endswith("\\x1b[2Jevil\\xe9.example  \\x1b]0;x\\x07")
+    assert line.isascii()
+
+    with closing(storage.connect(tmp_path / ingest.DB_NAME)) as conn:
+        with storage.transaction(conn):
+            dnsdb.store(conn, [hostile])
+        text = report.summary(conn, since_us=0, hours=24, limit=5)
+    assert "\\x1b[2Jevil\\xe9.example" in text
+    assert text.isascii() and "\x1b" not in text
+
+
 def test_auth_recent_and_alerts_commands(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

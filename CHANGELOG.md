@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- DNS queries for names with a space in them were logged by dnsmasq but not stored. That
+  includes every name with a byte dnsmasq can't print, which it logs as `<name unprintable>`, so
+  any client could keep its lookups out of Netwatch's log and metrics. They are stored now, with
+  the name as dnsmasq logged it.
+- Counts and ports out of range are usage errors: `-n -1` printed every row (SQLite reads
+  `LIMIT -1` as no limit), and `dns check --port 70000` or a huge `dns top --hours` ended in a
+  traceback. `dns check --name` rejects a name that isn't one (an empty or 64-character label)
+  in one line instead of a traceback or a malformed query.
+- `netwatch blocklist update` stops with one line, keeps the current list and leaves no
+  temporary file when the allowlist can't be read (for example root-only after an edit) or the
+  list can't be written; it was a traceback in the journal. The allowlist is now read before
+  anything is downloaded.
+- Stopping dnsmasq no longer logs "Failed to revert interface configuration: Link lo is loopback
+  device" now and then: Ubuntu's stop hook ignores `DNSMASQ_EXCEPT`, so Netwatch's drop-in
+  turns it off (there is nothing for it to undo).
+
+### Security
+- `netwatch dns recent` and `dns top` escape control and non-ASCII characters in DNS names and
+  answers, as the SSH and alert reports already did for usernames, so a name can't send escape
+  sequences to the terminal. dnsmasq 2.92 already logs such names as `<name unprintable>`; this
+  covers imported logs and other resolvers.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

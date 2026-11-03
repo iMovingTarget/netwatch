@@ -17,6 +17,8 @@ from netwatch.errors import NetwatchError
 
 QTYPES = {"A": 1, "CNAME": 5, "AAAA": 28}
 RCODES = {0: "NOERROR", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN", 4: "NOTIMP", 5: "REFUSED"}
+MAX_LABEL = 63  # bytes in one label (RFC 1035)
+MAX_NAME = 253  # characters in a whole name, written with dots and no trailing dot
 
 
 class ProbeError(NetwatchError):
@@ -30,11 +32,33 @@ class Response:
     elapsed_ms: float
 
 
+def encode_name(name: str) -> bytes:
+    """``name`` as it goes on the wire: each label prefixed with its length, then a zero byte.
+
+    Raises ValueError for anything that can't be a DNS name: an empty label (``a..example``), a
+    label over 63 bytes, a name over 253 characters, or text IDNA can't encode. A zero-length
+    label would end the name early, so the resolver would read the rest as garbage.
+    """
+    text = name[:-1] if name.endswith(".") else name
+    try:
+        labels = [label.encode("idna") for label in text.split(".")]
+    except UnicodeError:
+        labels = []
+    if (
+        not labels
+        or not all(0 < len(label) <= MAX_LABEL for label in labels)
+        or len(b".".join(labels)) > MAX_NAME
+    ):
+        raise ValueError(
+            f"{name!r} is not a DNS name: labels of 1 to {MAX_LABEL} characters separated by"
+            f" dots, at most {MAX_NAME} in all"
+        )
+    return b"".join(bytes([len(label)]) + label for label in labels) + b"\x00"
+
+
 def build_query(name: str, qtype: str, qid: int) -> bytes:
     header = struct.pack("!HHHHHH", qid, 0x0100, 1, 0, 0, 0)  # recursion desired, 1 question
-    labels = [label.encode("idna") for label in name.rstrip(".").split(".")]
-    qname = b"".join(bytes([len(label)]) + label for label in labels) + b"\x00"
-    return header + qname + struct.pack("!HH", QTYPES[qtype], 1)
+    return header + encode_name(name) + struct.pack("!HH", QTYPES[qtype], 1)
 
 
 def parse_response(data: bytes, qid: int) -> tuple[str, tuple[str, ...]]:

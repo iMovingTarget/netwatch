@@ -38,6 +38,34 @@ from netwatch.errors import ConfigError, NetwatchError
 
 Handler = Callable[[argparse.Namespace, Mapping[str, str]], int]
 
+MAX_ROWS = 1_000_000
+MAX_HOURS = 100 * 366 * 24  # a century: longer than anything is kept
+MAX_PORT = 65535
+
+
+def _whole_number(maximum: int) -> Callable[[str], int]:
+    """An argparse type for a count: a whole number from 1 to ``maximum``.
+
+    Without it, -n -1 reached SQLite as LIMIT -1, which means no limit at all, and numbers too
+    large for C (a port, an hour count) ended in a traceback.
+    """
+
+    def parse(text: str) -> int:
+        try:
+            value = int(text)
+        except ValueError:
+            value = 0
+        if not 1 <= value <= maximum:
+            raise argparse.ArgumentTypeError(
+                f"must be a whole number from 1 to {maximum}, not {text!r}"
+            )
+        return value
+
+    return parse
+
+
+_rows = _whole_number(MAX_ROWS)
+
 
 def version_string(environ: Mapping[str, str]) -> str:
     """The version, plus the git revision when the installer recorded one."""
@@ -83,20 +111,24 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
         " first name on the blocklist is answered with 0.0.0.0.",
     )
     check_cmd.add_argument("--server", help="resolver address (default: first NETWATCH_DNS_LISTEN)")
-    check_cmd.add_argument("--port", type=int, default=53, help="resolver port (default: 53)")
+    check_cmd.add_argument(
+        "--port", type=_whole_number(MAX_PORT), default=53, help="resolver port (default: 53)"
+    )
     check_cmd.add_argument("--name", help="name to look up (default: example.com)")
     check_cmd.add_argument(
         "--type", choices=sorted(dnsprobe.QTYPES), default="A", help="record type (default: A)"
     )
     check_cmd.set_defaults(handler=_dns_check)
     recent_cmd = dns.add_parser("recent", help="show the most recent queries")
-    recent_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    recent_cmd.add_argument("-n", type=_rows, default=20, help="how many (default: 20)")
     recent_cmd.add_argument("--client", help="only queries from this client address")
     recent_cmd.add_argument("--blocked", action="store_true", help="only blocked queries")
     recent_cmd.set_defaults(handler=_dns_recent)
     top_cmd = dns.add_parser("top", help="summarise recent queries: counts, top names and clients")
-    top_cmd.add_argument("--hours", type=int, default=24, help="time window (default: 24)")
-    top_cmd.add_argument("-n", type=int, default=10, help="rows per list (default: 10)")
+    top_cmd.add_argument(
+        "--hours", type=_whole_number(MAX_HOURS), default=24, help="time window (default: 24)"
+    )
+    top_cmd.add_argument("-n", type=_rows, default=10, help="rows per list (default: 10)")
     top_cmd.set_defaults(handler=_dns_top)
 
     auth = commands.add_parser("auth", help="SSH login monitoring").add_subparsers(
@@ -115,7 +147,7 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     )
     watch_cmd.set_defaults(handler=_run_auth_watch)
     auth_recent_cmd = auth.add_parser("recent", help="show the most recent SSH logins")
-    auth_recent_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    auth_recent_cmd.add_argument("-n", type=_rows, default=20, help="how many (default: 20)")
     auth_recent_cmd.add_argument("--source", help="only logins from this address")
     auth_recent_cmd.add_argument("--failed", action="store_true", help="only failed logins")
     auth_recent_cmd.set_defaults(handler=_auth_recent)
@@ -154,7 +186,7 @@ def build_parser(environ: Mapping[str, str]) -> argparse.ArgumentParser:
     label_cmd.set_defaults(handler=_devices_label)
 
     alerts_cmd = commands.add_parser("alerts", help="show the most recent alerts")
-    alerts_cmd.add_argument("-n", type=int, default=20, help="how many (default: 20)")
+    alerts_cmd.add_argument("-n", type=_rows, default=20, help="how many (default: 20)")
     alerts_cmd.set_defaults(handler=_alerts)
 
     notify_cmd = commands.add_parser("notify", help="Telegram notifications").add_subparsers(
@@ -268,7 +300,11 @@ def _dns_check(args: argparse.Namespace, environ: Mapping[str, str]) -> int:
     if server is None:
         raise ConfigError("no resolver to check: pass --server or set NETWATCH_DNS_LISTEN")
     ok = True
-    name = args.name or "example.com"
+    name = "example.com" if args.name is None else args.name
+    try:
+        dnsprobe.encode_name(name)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
     reply = dnsprobe.query(server, name, args.type, port=args.port)
     answers = ", ".join(reply.answers) or "no records"
     print(f"{server}: {name} {args.type} -> {reply.rcode} {answers} ({reply.elapsed_ms:.0f} ms)")
