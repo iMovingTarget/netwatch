@@ -32,13 +32,23 @@ def _columns(rows: Sequence[Sequence[str]]) -> str:
 
 
 def recent_table(queries: list[DnsQuery], tz: tzinfo | None = None) -> str:
-    """Oldest first, so the newest line ends up next to the prompt."""
+    """Oldest first, so the newest line ends up next to the prompt.
+
+    Names are chosen by clients and answers by whoever runs the domain, so both are escaped.
+    """
     if not queries:
         return "no queries stored yet\n"
     rows = [("TIME", "CLIENT", "TYPE", "STATUS", "NAME", "ANSWER")]
     for q in reversed(queries):
         rows.append(
-            (_time(q.ts_us, tz), q.client, q.qtype, q.status, q.name, _ascii(q.answer or "-"))
+            (
+                _time(q.ts_us, tz),
+                q.client,
+                q.qtype,
+                q.status,
+                _escaped(q.name),
+                _escaped(q.answer or "-"),
+            )
         )
     return _columns(rows)
 
@@ -123,7 +133,7 @@ def summary(conn: sqlite3.Connection, since_us: int, hours: int, limit: int) -> 
         ("Most queried names", dnsdb.top_names(conn, since_us, limit)),
     ):
         lines += ["", f"{title}:"]
-        lines += [f"  {count:>7}  {_ascii(name)}" for name, count in rows] or ["  (none)"]
+        lines += [f"  {count:>7}  {_escaped(name)}" for name, count in rows] or ["  (none)"]
     lines += ["", "Busiest clients:", f"  {'queries':>7}  {'blocked':>7}  client"]
     clients = dnsdb.top_clients(conn, since_us, limit)
     lines += [f"  {n:>7}  {b:>7}  {client}" for client, n, b in clients] or ["  (none)"]
@@ -133,18 +143,14 @@ def summary(conn: sqlite3.Connection, since_us: int, hours: int, limit: int) -> 
 def _escaped(text: str) -> str:
     """``text`` with control and non-ASCII characters escaped (\\x1b, \\xe9, ...).
 
-    For text an outsider controls, such as an SSH username: printed raw, an escape sequence in it
-    could rewrite the terminal of whoever reads the report.
+    For text an outsider controls, such as an SSH username or a DNS name: printed raw, an escape
+    sequence in it could rewrite the terminal of whoever reads the report. The result is ASCII,
+    so it can also be printed to a console redirected on Windows.
     """
     return "".join(
         ch if ch.isascii() and ch.isprintable() else ch.encode("unicode_escape").decode("ascii")
         for ch in text
     )
-
-
-def _ascii(text: str) -> str:
-    # Console output may be redirected on Windows; non-ASCII would raise there.
-    return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def notify_status(status: Status, tz: tzinfo | None = None) -> str:

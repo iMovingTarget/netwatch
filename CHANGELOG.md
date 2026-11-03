@@ -20,6 +20,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   list can't be written; it was a traceback in the journal. The allowlist is now read before
   anything is downloaded.
 
+### Security
+- `netwatch dns recent` and `dns top` escape control and non-ASCII characters in DNS names and
+  answers, as the SSH and alert reports already did for usernames, so a name can't send escape
+  sequences to the terminal. dnsmasq 2.92 already logs such names as `<name unprintable>`; this
+  covers imported logs and other resolvers.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added
