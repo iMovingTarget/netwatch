@@ -132,3 +132,13 @@ def test_the_token_file_name_matches_the_code() -> None:
     assert path == config.DEFAULT_TELEGRAM_TOKEN_FILE
     install = (UNITS.parent / "install.sh").read_text()
     assert "TOKEN_FILE=$CONF_DIR/telegram-bot-token" in install
+
+
+def test_dnsmasq_dropin_skips_the_resolvconf_hooks_both_ways() -> None:
+    # Found in the v0.6.0 audit: DNSMASQ_EXCEPT=lo makes Ubuntu's start hook skip registering
+    # 127.0.0.1 as the host's resolver, but the stop hook ignores it and runs
+    # `resolvconf -d lo.dnsmasq` anyway, which systemd-resolved answers with a warning in the
+    # journal ("Failed to revert interface configuration: Link lo is loopback device").
+    settings = _settings("dnsmasq.service.d/netwatch.conf")
+    assert settings["Environment"] == ["DNSMASQ_EXCEPT=lo"]
+    assert settings["ExecStop"] == [""]  # reset: no stop hook; systemd still sends SIGTERM

@@ -19,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   temporary file when the allowlist can't be read (for example root-only after an edit) or the
   list can't be written; it was a traceback in the journal. The allowlist is now read before
   anything is downloaded.
+- Stopping dnsmasq no longer logs "Failed to revert interface configuration: Link lo is loopback
+  device" now and then: Ubuntu's stop hook ignores `DNSMASQ_EXCEPT`, so Netwatch's drop-in
+  turns it off (there is nothing for it to undo).
 
 ### Security
 - `netwatch dns recent` and `dns top` escape control and non-ASCII characters in DNS names and
