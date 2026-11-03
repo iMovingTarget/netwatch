@@ -79,3 +79,46 @@ def test_notify_status_before_and_after_the_first_start(
     assert "notifications:  on, chat 42" in out
     assert "alerts:         0 sent, 0 suppressed, 0 summarised" in out
     assert "waiting:        0" in out
+
+
+# Found in the v0.6.0 audit: -n -1 meant "no limit" (SQLite reads LIMIT -1 that way), 0 printed
+# nothing, and a port or an hour count too large for C ended in a Python traceback.
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["dns", "recent", "-n", "-1"],
+        ["dns", "recent", "-n", "0"],
+        ["dns", "top", "-n", "-5"],
+        ["dns", "top", "--hours", "0"],
+        ["dns", "top", "--hours", "99999999999999"],
+        ["auth", "recent", "-n", "-1"],
+        ["alerts", "-n", "0"],
+        ["alerts", "-n", "ten"],
+        ["dns", "check", "--server", "192.0.2.53", "--port", "70000"],
+        ["dns", "check", "--server", "192.0.2.53", "--port", "0"],
+    ],
+)
+def test_numbers_out_of_range_are_usage_errors(
+    argv: list[str], capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(argv, environ={"NETWATCH_STATE_DIR": str(tmp_path)})
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "must be a whole number from 1 to" in err
+    assert "Traceback" not in err
+
+
+# Found in the v0.6.0 audit: a label over 63 characters ended in a UnicodeError traceback, and an
+# empty label (a..example) sent a malformed query that the resolver never answered.
+@pytest.mark.parametrize(
+    "name", ["a" * 64 + ".example", "a..example", "", ".", "a." * 127 + "example"]
+)
+def test_dns_check_rejects_names_that_are_not_dns_names(
+    name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = ["dns", "check", "--server", "192.0.2.53", "--name", name]
+    assert main(argv, environ={}) == 2
+    err = capsys.readouterr().err
+    assert "is not a DNS name" in err
+    assert "Traceback" not in err

@@ -79,3 +79,16 @@ def test_query_against_a_local_responder() -> None:
         reply = dnsprobe.query("127.0.0.1", "www.example.net", port=port, timeout=2)
         t.join()
     assert (reply.rcode, reply.answers) == ("NOERROR", ("192.0.2.80",))
+
+
+def test_encode_name() -> None:
+    assert dnsprobe.encode_name("example.com.") == b"\x07example\x03com\x00"
+    # Non-ASCII names go out in their IDNA (punycode) form, as a browser would send them.
+    assert dnsprobe.encode_name("bücher.example") == b"\x0dxn--bcher-kva\x07example\x00"
+    assert len(dnsprobe.encode_name("a" * 63 + ".example")) == 1 + 63 + 1 + 7 + 1
+
+
+@pytest.mark.parametrize("name", ["a" * 64 + ".example", "a..example", "", ".", "a." * 127 + "b"])
+def test_encode_name_rejects_what_is_not_a_dns_name(name: str) -> None:
+    with pytest.raises(ValueError, match="is not a DNS name"):
+        dnsprobe.encode_name(name)

@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   includes every name with a byte dnsmasq can't print, which it logs as `<name unprintable>`, so
   any client could keep its lookups out of Netwatch's log and metrics. They are stored now, with
   the name as dnsmasq logged it.
+- Counts and ports out of range are usage errors: `-n -1` printed every row (SQLite reads
+  `LIMIT -1` as no limit), and `dns check --port 70000` or a huge `dns top --hours` ended in a
+  traceback. `dns check --name` rejects a name that isn't one (an empty or 64-character label)
+  in one line instead of a traceback or a malformed query.
 
 ## [0.6.0] - 2026-11-02
 
