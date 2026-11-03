@@ -16,6 +16,7 @@ page or an empty file would otherwise switch blocking off for the whole network.
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import logging
 import os
@@ -122,10 +123,12 @@ class Header:
 def read_header(path: Path) -> Header | None:
     """What an existing blocklist file says about itself, or None if there is no file."""
     try:
-        with path.open(encoding="utf-8") as f:
+        with path.open(encoding="utf-8", errors="replace") as f:
             head = "".join(next(f, "") for _ in range(20))
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
+    except OSError as exc:
+        raise BlocklistError(f"cannot read {path}: {exc.strerror or exc}") from exc
     generated = re.search(r"^# Netwatch blocklist, generated (\S+)$", head, re.MULTILINE)
     count = _COUNT_HEADER.search(head)
     return Header(
@@ -138,12 +141,14 @@ def read_header(path: Path) -> Header | None:
 def first_domain(path: Path) -> str | None:
     """Some name the blocklist file blocks (the first), for a smoke test."""
     try:
-        with path.open(encoding="utf-8") as f:
+        with path.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 if line.startswith("0.0.0.0 "):
                     return line.split()[1]
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         pass
+    except OSError as exc:
+        raise BlocklistError(f"cannot read {path}: {exc.strerror or exc}") from exc
     return None
 
 
@@ -154,10 +159,19 @@ def current_count(path: Path) -> int | None:
 
 
 def read_allowlist(path: Path) -> set[str]:
+    """The names never to block. No file means none; a file that can't be read is an error.
+
+    Ignoring an unreadable allowlist would quietly block the names the user allowed.
+    """
     try:
-        return parse(path.read_text(encoding="utf-8"))
+        return parse(path.read_text(encoding="utf-8", errors="replace"))
     except FileNotFoundError:
         return set()
+    except OSError as exc:
+        raise BlocklistError(
+            f"cannot read the allowlist {path}: {exc.strerror or exc}; keeping the current list"
+            " (it must be readable by the netwatch user)"
+        ) from exc
 
 
 def fetch_url(url: str) -> str:
@@ -183,6 +197,8 @@ def update(
     min_domains: int = MIN_DOMAINS,
 ) -> UpdateResult:
     """Download every configured list, check the result, and swap it into place."""
+    # First, so a problem with it shows before anything is downloaded.
+    allow = read_allowlist(settings.allowlist_file)
     domains: set[str] = set()
     for url in settings.blocklist_urls:
         found = parse(fetch(url))
@@ -190,7 +206,6 @@ def update(
             raise BlocklistError(f"{url}: no domains found (not a hosts file or domain list?)")
         log.info("%s: %d domains", url, len(found))
         domains |= found
-    allow = read_allowlist(settings.allowlist_file)
     allowed = len(domains & allow)
     domains -= allow
 
@@ -219,15 +234,23 @@ def update(
 
 
 def _write_atomically(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     # The leading dot keeps dnsmasq from reading the file before it is complete.
     tmp = path.with_name(f".{path.name}.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.chmod(0o644)  # dnsmasq reads it as its own user
-    os.replace(tmp, path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.chmod(0o644)  # dnsmasq reads it as its own user
+        os.replace(tmp, path)
+    except OSError as exc:
+        # A full disk can fail halfway; don't leave megabytes of half a list behind.
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise BlocklistError(
+            f"cannot write {path}: {exc.strerror or exc}; keeping the current list"
+        ) from exc
 
 
 def _is_ip(text: str) -> bool:

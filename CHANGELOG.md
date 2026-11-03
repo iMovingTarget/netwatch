@@ -15,6 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `LIMIT -1` as no limit), and `dns check --port 70000` or a huge `dns top --hours` ended in a
   traceback. `dns check --name` rejects a name that isn't one (an empty or 64-character label)
   in one line instead of a traceback or a malformed query.
+- `netwatch blocklist update` stops with one line, keeps the current list and leaves no
+  temporary file when the allowlist can't be read (for example root-only after an edit) or the
+  list can't be written; it was a traceback in the journal. The allowlist is now read before
+  anything is downloaded.
 
 ## [0.6.0] - 2026-11-02
 

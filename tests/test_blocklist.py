@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import stat
 import sys
 from datetime import UTC, datetime
@@ -125,6 +126,67 @@ def test_a_source_with_no_domains_is_an_error(tmp_path: Path) -> None:
         blocklist.update(settings, fetch=_fetcher({URL_A: page}), now=lambda: NOW)
 
 
+BIG = "\n".join(f"0.0.0.0 ad{i}.example.com" for i in range(10))
+
+
+# Found in the v0.6.0 audit: an allowlist the service can't read (root-only after an edit, a
+# directory by mistake) or a blocklist directory it can't write ended in a traceback in the
+# journal. The update must stop with one line, keep the current list and leave no temporary file.
+def test_an_unreadable_allowlist_is_one_line_and_keeps_the_list(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    blocklist.update(settings, fetch=_fetcher({URL_A: BIG}), now=lambda: NOW, min_domains=1)
+    (tmp_path / "allowlist.txt").mkdir()  # can't be read as a file, even by root
+
+    with pytest.raises(BlocklistError, match=r"cannot read the allowlist .*allowlist\.txt"):
+        blocklist.update(settings, fetch=_fetcher({URL_A: HOSTS}), now=lambda: NOW, force=True)
+    assert blocklist.current_count(settings.blocklist_dir / blocklist.HOSTS_FILE) == 10
+
+
+def test_a_blocklist_directory_that_cannot_be_written_is_one_line(tmp_path: Path) -> None:
+    (tmp_path / "not-a-directory").write_text("")
+    settings = load_settings(
+        {
+            "NETWATCH_BLOCKLIST_DIR": str(tmp_path / "not-a-directory" / "blocklist"),
+            "NETWATCH_ALLOWLIST_FILE": str(tmp_path / "allowlist.txt"),
+            "NETWATCH_BLOCKLIST_URLS": URL_A,
+        }
+    )
+    with pytest.raises(BlocklistError, match="cannot write"):
+        blocklist.update(settings, fetch=_fetcher({URL_A: BIG}), now=lambda: NOW, min_domains=1)
+
+
+def test_a_failed_swap_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+
+    def refuse(src: object, dst: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(blocklist.os, "replace", refuse)
+    with pytest.raises(BlocklistError, match=r"cannot write .*: Permission denied"):
+        blocklist.update(settings, fetch=_fetcher({URL_A: BIG}), now=lambda: NOW, min_domains=1)
+    assert not list(settings.blocklist_dir.glob(".*"))
+
+
+def test_blocklist_update_errors_are_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        blocklist.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(BIG.encode())
+    )
+    (tmp_path / "allowlist").mkdir()
+    env = {
+        "NETWATCH_BLOCKLIST_DIR": str(tmp_path / "blocklist"),
+        "NETWATCH_ALLOWLIST_FILE": str(tmp_path / "allowlist"),
+        "NETWATCH_BLOCKLIST_URLS": URL_A,
+    }
+    assert main(["blocklist", "update"], environ=env) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert err.count("\n") == 1
+
+
 def test_fetch_errors_name_the_url(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*args: object, **kwargs: object) -> None:
         raise OSError("connection refused")
@@ -144,3 +206,11 @@ def test_status_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     out = capsys.readouterr().out
     assert "generated: 2026-10-28T12:00:00+00:00" in out
     assert "domains:   1" in out
+
+
+def test_read_header_of_a_file_that_cannot_be_read_is_one_line(tmp_path: Path) -> None:
+    (tmp_path / blocklist.HOSTS_FILE).mkdir()  # can't be opened as a file, even by root
+    with pytest.raises(BlocklistError, match="cannot read"):
+        blocklist.read_header(tmp_path / blocklist.HOSTS_FILE)
+    with pytest.raises(BlocklistError, match="cannot read"):
+        blocklist.first_domain(tmp_path / blocklist.HOSTS_FILE)
