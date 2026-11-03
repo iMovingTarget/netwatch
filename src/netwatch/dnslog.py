@@ -24,9 +24,14 @@ from dataclasses import dataclass, field
 
 # "<serial> <client>/<port> <rest>"; the client may be IPv4 or IPv6.
 _LINE = re.compile(r"^(?P<serial>\d+) (?P<client>\S+)/(?P<port>\d+) (?P<rest>.+)$")
-_QUERY = re.compile(r"^query\[(?P<qtype>[^\]]+)\] (?P<name>\S+) from \S+$")
-_FORWARDED = re.compile(r"^forwarded (?P<name>\S+) to (?P<upstream>\S+)$")
-_ANSWER = re.compile(r"^(?P<source>\S+) (?P<name>\S+) is (?P<value>.+)$")
+# A name is not always one word. The client chooses it: a space is printable, so dnsmasq logs it
+# as it is, and a name with a byte it can't print is logged as "<name unprintable>". So a name is
+# everything up to the last word of the line (an address), and an answer's name ends at the
+# first " is ", because answers have spaces too (TXT records). A name that itself contains
+# " is " therefore gets the rest of its name in the answer; the query is still stored.
+_QUERY = re.compile(r"^query\[(?P<qtype>[^\]]+)\] (?P<name>.+) from \S+$")
+_FORWARDED = re.compile(r"^forwarded (?P<name>.+) to (?P<upstream>\S+)$")
+_ANSWER = re.compile(r"^(?P<source>\S+) (?P<name>.+?) is (?P<value>.+)$")
 
 _RESTART_PREFIX = "started, version "
 

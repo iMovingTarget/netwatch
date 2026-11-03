@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from netwatch.dnslog import QueryAssembler
 
 FIXTURE = Path(__file__).parent / "fixtures" / "dnsmasq-journal.jsonl"
@@ -94,6 +96,53 @@ def test_ipv6_client() -> None:
     )
     [query] = assembler.flush_all()
     assert (query.client, query.status) == ("2001:db8::10", "cached")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # What dnsmasq logs in place of a name with a byte it can't print: a control character,
+        # anything outside ASCII. Any client can send such a name.
+        "<name unprintable>",
+        # A space is printable, so dnsmasq logs it as it is.
+        "two words.example.com",
+        # The words the log lines are built from, inside a name.
+        "a from b is c to d.example.com",
+    ],
+)
+def test_names_with_spaces_are_stored(name: str) -> None:
+    # Found in the v0.6.0 audit: the parser took a name to be one word, so these queries were
+    # logged by dnsmasq but never stored, and a client could keep its lookups out of Netwatch.
+    assembler = QueryAssembler(BLOCKLIST_DIR)
+    _feed(
+        assembler,
+        [
+            (0, f"4 192.0.2.10/1 query[A] {name} from 192.0.2.10"),
+            (1, f"4 192.0.2.10/1 forwarded {name} to 198.51.100.1"),
+            (2, f"4 192.0.2.10/1 reply {name} is NODATA-IPv4"),
+        ],
+    )
+    [query] = assembler.flush_all()
+    assert (query.name, query.qtype, query.client, query.status, query.upstream) == (
+        name,
+        "A",
+        "192.0.2.10",
+        "forwarded",
+        "198.51.100.1",
+    )
+
+
+def test_an_answer_with_spaces_keeps_them() -> None:
+    assembler = QueryAssembler(BLOCKLIST_DIR)
+    _feed(
+        assembler,
+        [
+            (0, "5 192.0.2.10/1 query[TXT] example.com from 192.0.2.10"),
+            (1, "5 192.0.2.10/1 reply example.com is this is a test"),
+        ],
+    )
+    [query] = assembler.flush_all()
+    assert query.answer == "this is a test"
 
 
 def test_resume_cursor_is_the_oldest_pending_query() -> None:

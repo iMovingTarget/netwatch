@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- DNS queries for names with a space in them were logged by dnsmasq but not stored. That
+  includes every name with a byte dnsmasq can't print, which it logs as `<name unprintable>`, so
+  any client could keep its lookups out of Netwatch's log and metrics. They are stored now, with
+  the name as dnsmasq logged it.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added
